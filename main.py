@@ -12,8 +12,11 @@ app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # ---------------- Zerodha Credentials ----------------
-API_KEY = "bi2z9m2ympdrgkig"
-API_SECRET = "1c021e83lqngtuma0p5yk6son4051euc"  # Replace with your secret
+import os
+
+API_KEY = os.getenv("ZERODHA_API_KEY")
+API_SECRET = os.getenv("ZERODHA_API_SECRET")
+
 ACCESS_TOKEN_FILE = "access_token.json"
 
 # ---------------- Instrument Tokens (NSE) ----------------
