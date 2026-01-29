@@ -1,6 +1,5 @@
 import json
 import threading
-import time
 from datetime import date
 from flask import Flask, render_template, redirect, request
 from flask_socketio import SocketIO
@@ -12,11 +11,8 @@ app = Flask(__name__)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
 # ---------------- Zerodha Credentials ----------------
-import os
-
-API_KEY = os.getenv("ZERODHA_API_KEY")
-API_SECRET = os.getenv("ZERODHA_API_SECRET")
-
+API_KEY = "bi2z9m2ympdrgkig"
+API_SECRET = "1c021e83lqngtuma0p5yk6son4051euc"
 ACCESS_TOKEN_FILE = "access_token.json"
 
 # ---------------- Instrument Tokens (NSE) ----------------
@@ -56,7 +52,7 @@ TOKENS = {
 # ---------------- Logos Mapping ----------------
 LOGOS = {symbol: f"https://logo.clearbit.com/{symbol.lower()}.com" for symbol in TOKENS.values()}
 
-# ---------------- KiteConnect Setup ----------------
+# ---------------- Kite Setup ----------------
 kite = KiteConnect(api_key=API_KEY)
 kws = None
 
@@ -65,10 +61,8 @@ def load_access_token():
     try:
         with open(ACCESS_TOKEN_FILE, "r") as f:
             data = json.load(f)
-            token_date = data.get("date")
-            token = data.get("access_token")
-            if token_date == str(date.today()):
-                return token
+            if data.get("date") == str(date.today()):
+                return data.get("access_token")
     except:
         pass
     return None
@@ -79,12 +73,10 @@ def save_access_token(token):
 
 def get_access_token(request_token):
     data = kite.generate_session(request_token, api_secret=API_SECRET)
-    access_token = data["access_token"]
-    kite.set_access_token(access_token)
-    save_access_token(access_token)
-    return access_token
+    kite.set_access_token(data["access_token"])
+    save_access_token(data["access_token"])
 
-# ---------------- Flask Routes ----------------
+# ---------------- Routes ----------------
 @app.route("/")
 def index():
     return render_template("index.html")
@@ -98,6 +90,7 @@ def callback():
     request_token = request.args.get("request_token")
     if not request_token:
         return "❌ Request token missing"
+
     try:
         get_access_token(request_token)
         threading.Thread(target=start_kite_ws, daemon=True).start()
@@ -114,17 +107,23 @@ def on_connect(ws, response):
 def on_ticks(ws, ticks):
     for t in ticks:
         symbol = TOKENS.get(t["instrument_token"])
+
+        # ✅ Convert datetime to string (VERY IMPORTANT)
+        ltt = t.get("last_trade_time")
+        last_trade_time = ltt.isoformat() if ltt else None
+
         filtered_data = {
             "Symbol": symbol,
             "Logo": LOGOS.get(symbol),
-            "Time": t.get("last_trade_time"),
-            "Open": t.get("ohlc", {}).get("close", 0),
-            "High": t.get("ohlc", {}).get("high", 0),
-            "Low": t.get("ohlc", {}).get("low", 0),
-            "Close": t.get("last_price", 0),
-            "LTP": t.get("last_price", 0),
-            "TradedQty": t.get("volume", 0)
+            "Time": last_trade_time,
+            "Open": float(t.get("ohlc", {}).get("open", 0)),
+            "High": float(t.get("ohlc", {}).get("high", 0)),
+            "Low": float(t.get("ohlc", {}).get("low", 0)),
+            "Close": float(t.get("ohlc", {}).get("close", 0)),
+            "LTP": float(t.get("last_price", 0)),
+            "TradedQty": int(t.get("volume", 0))
         }
+
         socketio.emit("stock_update", filtered_data)
 
 def on_close(ws, code, reason):
@@ -136,8 +135,9 @@ def on_error(ws, code, reason):
 def start_kite_ws():
     global kws
     access_token = load_access_token()
+
     if not access_token:
-        print("❌ Access token missing or expired. Go to /login first.")
+        print("❌ Access token missing. Visit /login")
         return
 
     kite.set_access_token(access_token)
@@ -146,13 +146,13 @@ def start_kite_ws():
     kws.on_ticks = on_ticks
     kws.on_close = on_close
     kws.on_error = on_error
+
     try:
         kws.connect(threaded=True)
     except TokenException:
-        print("❌ Access token expired. Visit /login to generate a new one.")
+        print("❌ Token expired. Login again.")
 
 # ---------------- Main ----------------
 if __name__ == "__main__":
-    # Start WS if access token exists
     threading.Thread(target=start_kite_ws, daemon=True).start()
-    socketio.run(app, host="0.0.0.0", port=5000)
+    socketio.run(app, host="0.0.0.0", port=5000, debug=True)
