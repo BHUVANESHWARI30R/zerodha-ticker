@@ -1,0 +1,20 @@
+# flyctl launch added from .gitignore
+# Python cache files
+**\__pycache__
+**\*.pyc
+**\*.pyo
+
+# Environment files
+**\.env
+**\*.env
+
+# Access tokens / secrets
+**\access_token.json
+
+# VS Code files
+**\.vscode
+
+# Other OS files
+**\.DS_Store
+**\Thumbs.db
+fly.toml

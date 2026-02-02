@@ -2,110 +2,163 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Stock Ticker</title>
-<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-<link href="https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@500&family=Orbitron:wght@600&display=swap" rel="stylesheet">
+<title>DigiWave Stock Ticker</title>
+<link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.1/socket.io.min.js"></script>
+
 <style>
 body {
-  margin: 0;
-  background: #111;
-  color: white;
-  overflow: hidden;
-  font-family: "Roboto Mono", "Orbitron", monospace;
-  font-size: 30px;
-  font-weight: bolder;
-  height: 80px;
-  width: 100%;
+    margin: 0;
+    background: #000;
+    font-family: 'Teko', sans-serif;
+    overflow: hidden;
+}
+
+.ticker-container {
+    width: 100%;
+    height: 100px;
+    overflow: hidden;
+    border-top: 2px solid #1a73e8;
+    border-bottom: 2px solid #1a73e8;
+    display: flex;
+    align-items: center;
+    background: #000;
+}
+
+.ticker {
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+    animation: scroll-left 150s linear infinite; /* slow smooth scroll */
 }
 .ticker-wrapper {
-  width: 100%;
-  overflow: hidden;
-  background: #000;
-  border-bottom: 2px solid #333;
+    display: flex;
+    width: max-content;
+    animation: scroll 80s linear infinite;
 }
-.ticker {
-  display: inline-flex;
-  white-space: nowrap;
-  animation: scroll 80s linear infinite;
-}
-.ticker-dup {
-  display: inline-flex;
-}
-.stock {
-  display: inline-flex;
-  align-items: center;
-  min-width: 320px;
-  margin: 0 50px;
-}
-.stock img {
-  width: 38px;
-  height: 38px;
-  margin-right: 12px;
-  object-fit: contain;
-}
-.stock .row {
-  display: flex;
-  justify-content: space-evenly;
-  line-height: 1.6em;
-}
-.green { color: #00ff00; font-weight: 700; }
-.red { color: #ff3333; font-weight: 700; }
+
 @keyframes scroll {
-  0% { transform: translateX(0); }
-  100% { transform: translateX(-50%); }
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
 }
+
+
+.stock {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    margin-right: 60px;
+    min-width: 160px;
+    font-size: 22px;
+}
+
+.stock img {
+    width: auto;
+    height: 40px;
+    margin-right: 3px;
+}
+
+.stock-text {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    line-height: 1.2;
+}
+
+.symbol-ltp {
+    font-weight: bold;
+    font-size: 22px;
+}
+
+.change-arrow {
+    font-size: 22px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+}
+
+.arrow {
+    margin-right: 2px;
+    font-weight: bold;
+    font-size: 16px;
+}
+
+.up { color: lime; }
+.down { color: red; }
 </style>
 </head>
+
 <body>
-<div class="ticker-wrapper">
-  <div class="ticker" id="ticker">
-    <div class="ticker-dup" id="ticker-content"></div>
-    <div class="ticker-dup" id="ticker-clone"></div>
-  </div>
+<div class="ticker-container">
+    <div class="ticker-wrapper" id="ticker-wrapper">
+    <div class="ticker" id="ticker"></div>
+    <div class="ticker" id="ticker-clone"></div> </div><!-- Duplicate for smooth loop -->
 </div>
 
 <script>
 const socket = io();
-const tickerContent = document.getElementById("ticker-content");
+const ticker = document.getElementById("ticker");
 const tickerClone = document.getElementById("ticker-clone");
+const stocks = {};      // store latest LTP
+const elements = {};    // store DOM elements
 
+// Function to create/update a stock item
+function addOrUpdateStock(symbol, ltp) {
+    const prev = stocks[symbol] || ltp;
+    const diff = (ltp - prev).toFixed(2);
+    stocks[symbol] = ltp;
+
+    const colorClass = diff >= 0 ? 'up' : 'down';
+
+    if (!elements[symbol]) {
+        const el = document.createElement("div");
+        el.className = "stock";
+        el.id = symbol;
+
+        el.innerHTML = `
+            <img src="/static/logos/${symbol}.png" onerror="this.style.display='none'">
+            <div class="stock-text">
+                <div class="symbol-ltp ${colorClass}" id="${symbol}-symbol-ltp">
+                    ${symbol} ${ltp}
+                </div>
+                <div class="change-arrow ${colorClass}">
+                    <span class="arrow" id="${symbol}-arrow">${diff >= 0 ? '▲' : '▼'}</span>
+                    <span class="change" id="${symbol}-change">${diff >= 0 ? '+'+diff : diff}</span>
+                </div>
+            </div>
+        `;
+        ticker.appendChild(el);
+        tickerClone.appendChild(el.cloneNode(true)); // duplicate for infinite loop
+        elements[symbol] = el;
+    } else {
+        const symbolEl = document.getElementById(`${symbol}-symbol-ltp`);
+        const arrowEl = document.getElementById(`${symbol}-arrow`);
+        const changeEl = document.getElementById(`${symbol}-change`);
+        const changeArrowDiv = arrowEl.parentNode;
+
+        // Update values
+        symbolEl.innerText = `${symbol} ${ltp}`;
+        arrowEl.innerText = diff >= 0 ? '▲' : '▼';
+        changeEl.innerText = diff >= 0 ? `+${diff}` : diff;
+
+        // Update colors
+        symbolEl.className = `symbol-ltp ${colorClass}`;
+        changeArrowDiv.className = `change-arrow ${colorClass}`;
+    }
+}
+
+// Batch updates every 1 second for smoothness
+const pendingUpdates = {};
+setInterval(() => {
+    for (const symbol in pendingUpdates) {
+        addOrUpdateStock(symbol, pendingUpdates[symbol]);
+    }
+    Object.keys(pendingUpdates).forEach(k => delete pendingUpdates[k]);
+}, 1000);
+
+// Listen to WebSocket and queue updates
 socket.on("stock_update", data => {
-  let symbolId = "stock-" + data.Symbol;
-  let stockDiv = document.getElementById(symbolId);
-
-  let change = data.Close - data.Open;
-  let changePct = (change / data.Open * 100).toFixed(2);
-  let isGreen = change >= 0;
-  let arrow = isGreen ? "▲" : "▼";
-  let colorClass = isGreen ? "green" : "red";
-
-  if (!stockDiv) {
-    stockDiv = document.createElement("div");
-    stockDiv.className = "stock";
-    stockDiv.id = symbolId;
-    tickerContent.appendChild(stockDiv);
-  }
-
-  // Logos: Elbstream first, fallback LogoKit
-  let logoElb = `https://elbstream.com/logo/${data.Symbol}`;
-  let logoKit = `https://img.logokit.com/ticker/${data.Symbol}?token=YOUR_API_TOKEN`;
-
-  stockDiv.innerHTML = `
-    <img src="${logoElb}" onerror="this.src='${logoKit}'" alt="${data.Symbol} logo">
-    <div>
-      <div class="row">
-        <span>${data.Symbol}</span>
-        <span class="${colorClass}">${data.Close.toFixed(2)} ₹</span>
-      </div>
-      <div class="row">
-        <span class="${colorClass}">${arrow} ${changePct}%</span>
-        <span class="${colorClass}">${arrow} ${change.toFixed(2)}</span>
-      </div>
-    </div>
-  `;
-
-  tickerClone.innerHTML = tickerContent.innerHTML;
+    pendingUpdates[data.symbol] = data.ltp;
 });
 </script>
 </body>
