@@ -11,10 +11,7 @@
 # Access tokens / secrets
 **\access_token.json
 
-# VS Code files
-**\.vscode
-
 # Other OS files
 **\.DS_Store
 **\Thumbs.db
-fly.toml
+
