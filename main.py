@@ -16,6 +16,36 @@ socketio = SocketIO(app, cors_allowed_origins="*")
 
 
 
+# Delete old token file if exists
+if os.path.exists("tokens.json"):
+    os.remove("tokens.json")
+    print("🗑️ Old token.json deleted — fetching new token")
+
+# ---------------- Save tokens file ----------------
+TOKEN_FILE = "tokens.json"
+
+def save_tokens(tokens):
+    with open(TOKEN_FILE, "w") as f:
+        json.dump({
+            "tokens": tokens,
+            "date": datetime.now().strftime("%Y-%m-%d")
+        }, f)
+
+def load_tokens():
+    try:
+        with open(TOKEN_FILE, "r") as f:
+            data = json.load(f)
+
+        # refresh daily
+        if data["date"] == datetime.now().strftime("%Y-%m-%d"):
+            print("✅ Using cached tokens")
+            return data["tokens"]
+
+    except:
+        pass
+
+    return None
+
 # ---------------- Zerodha Credentials ----------------
 API_KEY = os.getenv("KITE_API_KEY")
 API_SECRET = os.getenv("KITE_API_SECRET")
@@ -25,38 +55,42 @@ if not API_KEY or not API_SECRET:
     raise RuntimeError("❌ Set KITE_API_KEY and KITE_API_SECRET in environment variables!")
 
 # ---------------- Instrument Tokens ----------------
-TOKENS = {
-    738561: "RELIANCE",
-    2953217: "TCS",
-    408065: "INFY",
-    341249: "HDFCBANK",
-    1270529: "ICICIBANK",
-    779521: "SBIN",
-    492033: "KOTAKBANK",
-    2939649: "LT",
-    1850625: "HCLTECH",
-    1510401: "AXISBANK",
-    2815745: "MARUTI",
-    4267265: "BAJAJ-AUTO",
-    969473: "WIPRO",
-    424961: "ITC",
-    633601: "ONGC",
-    2977281: "NTPC",
-    3834113: "POWERGRID",
-    897537: "TITAN",
-    2952193: "ULTRACEMCO",
-    60417: "ASIANPAINT",
-    356865: "HINDUNILVR",
-    857857: "SUNPHARMA",
-    225537: "DRREDDY",
-    3001089: "JSWSTEEL",
-    884737: "TATAMOTORS",
-    6401: "ADANIENT",
-    3861249: "ADANIPORTS",
-    1790465: "COALINDIA",
-    558337: "BPCL",
-    315393: "GRASIM"
-}
+TOKENS = {}
+
+#-----------------Tokens Loading ----------------
+def get_instrument_tokens():
+    """Fetch latest instrument tokens from Zerodha in alphabetical order"""
+    print("📥 Fetching latest instrument tokens...")
+
+    instruments = kite.instruments(exchange="NSE")
+
+    required_symbols = [
+        "ADANIENT","ADANIPORTS","APOLLOHOSP","ASIANPAINT","AXISBANK","BAJAJ-AUTO",
+        "BAJAJFINSV","BAJFINANCE","BPCL","BRITANNIA","CIPLA","COALINDIA",
+        "DABUR","DIVISLAB","DRREDDY","EICHERMOT","GRASIM","HCLTECH",
+        "HDFCBANK","HDFCLIFE","HEROMOTOCO","HINDALCO","HINDUNILVR","ICICIBANK",
+        "INDUSINDBK","INFY","IOC","ITC","JSWSTEEL","KOTAKBANK",
+        "LT","M&M","MARUTI","NESTLEIND","NTPC","ONGC",
+        "PIDILITIND","POWERGRID","RELIANCE","SBIN","SBILIFE","SHREECEM",
+        "SIEMENS","SUNPHARMA","TATAMOTORS","TATASTEEL","TECHM","TITAN",
+        "ULTRACEMCO","UPL","WIPRO"
+    ]
+
+    # 🔹 sort alphabetically
+    required_symbols.sort()
+
+    symbol_to_token = {}
+
+    # build lookup for faster matching
+    instrument_lookup = {item["tradingsymbol"]: item["instrument_token"] for item in instruments}
+
+    # create token mapping in sorted order
+    for symbol in required_symbols:
+        token = instrument_lookup.get(symbol)
+        if token:
+            symbol_to_token[token] = symbol
+
+    return symbol_to_token
 
 # ---------------- Kite Setup ----------------
 kite = KiteConnect(api_key=API_KEY)
@@ -123,14 +157,15 @@ def on_ticks(ws, ticks):
     for t in ticks:
         token = t["instrument_token"]
         symbol = TOKENS.get(token)
+        if not symbol:
+            continue
+
 
         payload = {
             "symbol": symbol,
-            "ltp": t.get("last_price", 0),
-            "open": t.get("ohlc", {}).get("open", 0),
-            "high": t.get("ohlc", {}).get("high", 0),
-            "low": t.get("ohlc", {}).get("low", 0),
-            "volume": t.get("volume", 0)
+            "ltp": round(t.get("last_price", 0), 2),
+            "change": round(t.get("change", 0) or 0, 2),
+            "change_percent": round(t.get("change_percent", 0) or 0, 2)
         }
 
         socketio.emit("stock_update", payload)
@@ -139,9 +174,26 @@ def on_close(ws, code, reason):
     print("⚠️ WebSocket closed:", reason)
 
 def on_error(ws, code, reason):
+    global TOKENS
     print("❌ WebSocket error:", reason)
 
+    print("🔄 Refreshing tokens and reconnecting...")
+
+    try:
+        TOKENS = get_instrument_tokens()
+        save_tokens(TOKENS)
+
+        ws.stop()
+
+        threading.Thread(target=start_kite_ws, daemon=True).start()
+
+    except Exception as e:
+        print("❌ Recovery failed:", e)
+
 def start_kite_ws():
+    global TOKENS
+    global kws
+
     print("🚀 start_kite_ws() called")
 
     access_token = load_access_token()
@@ -151,7 +203,33 @@ def start_kite_ws():
         print("❌ No access token, aborting WS")
         return
 
+    # Set access token first
     kite.set_access_token(access_token)
+
+    # ---------------- TOKEN LOADING (FIXED POSITION) ----------------
+    try:
+        # Try cached tokens first
+        TOKENS = load_tokens()
+
+        # If not available → fetch fresh
+        if not TOKENS:
+            print("📥 Fetching fresh tokens...")
+            TOKENS = get_instrument_tokens()
+
+            if not TOKENS:
+                print("❌ Token fetch failed")
+                return
+
+            save_tokens(TOKENS)
+
+        print("✅ Tokens ready:", len(TOKENS))
+
+    except Exception as e:
+        print("❌ Token loading failed:", e)
+        return
+    # ---------------------------------------------------------------
+
+    # Start WebSocket
     kws = KiteTicker(API_KEY, access_token)
 
     kws.on_connect = on_connect
@@ -163,40 +241,9 @@ def start_kite_ws():
     try:
         kws.connect(threaded=True)
     except TokenException:
-        print("❌ Access token expired. Visit /login to generate a new one.")
-
-    # ----------------- Market closed fallback -----------------
-    import time
-    from datetime import datetime
-
-    # Simple loop to check market hours (NSE: 09:15 to 15:30)
-    while True:
-        now = datetime.now()
-        if now.weekday() >= 5:  # Sat/Sun
-            is_market_open = False
-        else:
-            is_market_open = now.time() >= datetime.strptime("09:15", "%H:%M").time() and \
-                             now.time() <= datetime.strptime("15:30", "%H:%M").time()
-
-        if not is_market_open:
-            # Market closed: fetch last available prices
-            for token, symbol in TOKENS.items():
-                try:
-                    # get LTP from kite.ltp (dictionary format)
-                    ltp_data = kite.ltp(f"NSE:{symbol}")
-                    last_price = ltp_data[f"NSE:{symbol}"]["last_price"]
-                    payload = {
-                        "symbol": symbol,
-                        "ltp": last_price
-                    }
-                    socketio.emit("stock_update", payload)
-                except Exception as e:
-                    print(f"❌ Error fetching {symbol} LTP:", e)
-            time.sleep(5)  # update every 5 seconds when market closed
-        else:
-            break  # market open, live WS will take over
-
-# ---------------- Main ----------------
+        print("❌ Access token expired. Visit /login")
+ 
+ # ---------------- Main ----------------
 if __name__ == "__main__":
     print("🌐 Starting Flask App on http://0.0.0.0:8080")
     access_token = load_access_token()
@@ -209,5 +256,4 @@ if __name__ == "__main__":
         # Automatically open default browser to login
         webbrowser.open("http://127.0.0.1:8080/login")
 
-    socketio.run(app, host="0.0.0.0", port=8080, debug=False)
-
+    socketio.run(app, host="0.0.0.0", port=8080)

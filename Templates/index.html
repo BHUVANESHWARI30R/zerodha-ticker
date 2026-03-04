@@ -18,8 +18,7 @@ body {
     width: 100%;
     height: 100px;
     overflow: hidden;
-    border-top: 2px solid #1a73e8;
-    border-bottom: 2px solid #1a73e8;
+   
     display: flex;
     align-items: center;
     background: #000;
@@ -49,7 +48,7 @@ body {
     justify-content: flex-start;
     margin-right: 60px;
     min-width: 160px;
-    font-size: 22px;
+    font-size: 28px;
 }
 
 .stock img {
@@ -67,11 +66,11 @@ body {
 
 .symbol-ltp {
     font-weight: bold;
-    font-size: 22px;
+    font-size: 28px;
 }
 
 .change-arrow {
-    font-size: 22px;
+    font-size: 28px;
     font-weight: bold;
     display: flex;
     align-items: center;
@@ -80,7 +79,7 @@ body {
 .arrow {
     margin-right: 2px;
     font-weight: bold;
-    font-size: 16px;
+    font-size: 28px;
 }
 
 .up { color: lime; }
@@ -103,12 +102,11 @@ const stocks = {};      // store latest LTP
 const elements = {};    // store DOM elements
 
 // Function to create/update a stock item
-function addOrUpdateStock(symbol, ltp) {
-    const prev = stocks[symbol] || ltp;
-    const diff = (ltp - prev).toFixed(2);
+function addOrUpdateStock(symbol, ltp, change, changePercent) {
+
     stocks[symbol] = ltp;
 
-    const colorClass = diff >= 0 ? 'up' : 'down';
+    const colorClass = change < 0 ? 'down' : 'up';
 
     if (!elements[symbol]) {
         const el = document.createElement("div");
@@ -116,49 +114,71 @@ function addOrUpdateStock(symbol, ltp) {
         el.id = symbol;
 
         el.innerHTML = `
-            <img src="/static/logos/${symbol}.png" onerror="this.style.display='none'">
-            <div class="stock-text">
-                <div class="symbol-ltp ${colorClass}" id="${symbol}-symbol-ltp">
-                    ${symbol} ${ltp}
-                </div>
-                <div class="change-arrow ${colorClass}">
-                    <span class="arrow" id="${symbol}-arrow">${diff >= 0 ? '▲' : '▼'}</span>
-                    <span class="change" id="${symbol}-change">${diff >= 0 ? '+'+diff : diff}</span>
-                </div>
-            </div>
+           
+        <div class="stock-text">
+        <div class="symbol-ltp ${colorClass}" id="${symbol}-symbol-ltp">
+        ${symbol} ${ltp}
+        </div>
+
+        <div class="change-arrow ${colorClass}">
+        <span class="arrow" id="${symbol}-arrow">
+            ${change >= 0 ? '▲' : '▼'}
+        </span>
+
+        <span class="change" id="${symbol}-change">
+            ${change >= 0 ? '+' + change : change}
+            (${changePercent}%)
+        </span>
+        </div>
+        </div>
         `;
         ticker.appendChild(el);
         tickerClone.appendChild(el.cloneNode(true)); // duplicate for infinite loop
         elements[symbol] = el;
-    } else {
-        const symbolEl = document.getElementById(`${symbol}-symbol-ltp`);
-        const arrowEl = document.getElementById(`${symbol}-arrow`);
-        const changeEl = document.getElementById(`${symbol}-change`);
-        const changeArrowDiv = arrowEl.parentNode;
+        sortStocksAlphabetically();
 
-        // Update values
-        symbolEl.innerText = `${symbol} ${ltp}`;
-        arrowEl.innerText = diff >= 0 ? '▲' : '▼';
-        changeEl.innerText = diff >= 0 ? `+${diff}` : diff;
-
-        // Update colors
-        symbolEl.className = `symbol-ltp ${colorClass}`;
-        changeArrowDiv.className = `change-arrow ${colorClass}`;
     }
-}
+    else {
+    const symbolEl = document.getElementById(`${symbol}-symbol-ltp`);
+    const arrowEl = document.getElementById(`${symbol}-arrow`);
+    const changeEl = document.getElementById(`${symbol}-change`);
+    const changeArrowDiv = arrowEl.parentNode;
 
+    symbolEl.innerText = `${symbol} ${ltp}`;
+
+    arrowEl.innerText = change >= 0 ? '▲' : '▼';
+    changeEl.innerText = `${change >= 0 ? '+' + change : change} (${changePercent}%)`;
+
+    symbolEl.className = `symbol-ltp ${colorClass}`;
+    changeArrowDiv.className = `change-arrow ${colorClass}`;
+}
+}
 // Batch updates every 1 second for smoothness
+
+function sortStocksAlphabetically() {
+    const items = Array.from(ticker.children);
+
+    items.sort((a, b) => a.id.localeCompare(b.id));
+
+    items.forEach(item => ticker.appendChild(item));
+
+    // Also sort clone for smooth loop
+    tickerClone.innerHTML = "";
+    items.forEach(item => tickerClone.appendChild(item.cloneNode(true)));
+}
 const pendingUpdates = {};
 setInterval(() => {
     for (const symbol in pendingUpdates) {
-        addOrUpdateStock(symbol, pendingUpdates[symbol]);
+        const d = pendingUpdates[symbol];
+        addOrUpdateStock(symbol, d.ltp, d.change, d.change_percent);
     }
     Object.keys(pendingUpdates).forEach(k => delete pendingUpdates[k]);
 }, 1000);
 
 // Listen to WebSocket and queue updates
 socket.on("stock_update", data => {
-    pendingUpdates[data.symbol] = data.ltp;
+    
+    pendingUpdates[data.symbol] = data;
 });
 </script>
 </body>
