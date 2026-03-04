@@ -3,8 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <title>DigiWave Stock Ticker</title>
+
 <link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;600;700&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.1/socket.io.min.js"></script>
+
+<!-- ✅ Socket.IO v4 (compatible with Flask-SocketIO 5+) -->
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 
 <style>
 body {
@@ -16,20 +19,14 @@ body {
 
 .ticker-container {
     width: 100%;
-    height: 100px;
+    height: 90px;
     overflow: hidden;
-   
     display: flex;
     align-items: center;
     background: #000;
+    padding-top: -2px;
 }
 
-.ticker {
-    display: flex;
-    align-items: center;
-    white-space: nowrap;
-    animation: scroll-left 150s linear infinite; /* slow smooth scroll */
-}
 .ticker-wrapper {
     display: flex;
     width: max-content;
@@ -41,36 +38,33 @@ body {
     100% { transform: translateX(-50%); }
 }
 
+.ticker {
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+}
 
 .stock {
     display: flex;
     align-items: center;
-    justify-content: flex-start;
     margin-right: 60px;
     min-width: 160px;
-    font-size: 28px;
-}
-
-.stock img {
-    width: auto;
-    height: 40px;
-    margin-right: 3px;
+    font-size: 45px;
 }
 
 .stock-text {
     display: flex;
     flex-direction: column;
-    justify-content: center;
-    line-height: 1.2;
+    line-height: 0.9;
 }
 
 .symbol-ltp {
     font-weight: bold;
-    font-size: 28px;
+    font-size: 45px;
 }
 
 .change-arrow {
-    font-size: 28px;
+    font-size: 45px;
     font-weight: bold;
     display: flex;
     align-items: center;
@@ -78,8 +72,6 @@ body {
 
 .arrow {
     margin-right: 2px;
-    font-weight: bold;
-    font-size: 28px;
 }
 
 .up { color: lime; }
@@ -88,85 +80,98 @@ body {
 </head>
 
 <body>
+
 <div class="ticker-container">
-    <div class="ticker-wrapper" id="ticker-wrapper">
-    <div class="ticker" id="ticker"></div>
-    <div class="ticker" id="ticker-clone"></div> </div><!-- Duplicate for smooth loop -->
+    <div class="ticker-wrapper">
+        <div class="ticker" id="ticker"></div>
+        <div class="ticker" id="ticker-clone"></div>
+    </div>
 </div>
 
 <script>
 const socket = io();
 const ticker = document.getElementById("ticker");
 const tickerClone = document.getElementById("ticker-clone");
-const stocks = {};      // store latest LTP
-const elements = {};    // store DOM elements
 
-// Function to create/update a stock item
+const elements = {};
+const pendingUpdates = {};
+
+// ✅ Connection Debug
+socket.on("connect", () => {
+    console.log("✅ Connected to backend");
+});
+
+// ---------------- Create or Update Stock ----------------
 function addOrUpdateStock(symbol, ltp, change, changePercent) {
-
-    stocks[symbol] = ltp;
 
     const colorClass = change < 0 ? 'down' : 'up';
 
     if (!elements[symbol]) {
+
         const el = document.createElement("div");
         el.className = "stock";
-        el.id = symbol;
+        el.dataset.symbol = symbol;
 
         el.innerHTML = `
-           
-        <div class="stock-text">
-        <div class="symbol-ltp ${colorClass}" id="${symbol}-symbol-ltp">
-        ${symbol} ${ltp}
-        </div>
-
-        <div class="change-arrow ${colorClass}">
-        <span class="arrow" id="${symbol}-arrow">
-            ${change >= 0 ? '▲' : '▼'}
-        </span>
-
-        <span class="change" id="${symbol}-change">
-            ${change >= 0 ? '+' + change : change}
-            (${changePercent}%)
-        </span>
-        </div>
-        </div>
+            <div class="stock-text">
+                <div class="symbol-ltp ${colorClass}">
+                    ${symbol}  ${ltp}
+                </div>
+                <div class="change-arrow ${colorClass}">
+                    <span class="arrow">
+                        ${change >= 0 ? '▲' : '▼'}
+                    </span>
+                    <span>
+                        ${change >= 0 ? '+' + change : change}  (${changePercent}%)
+                    </span>
+                </div>
+            </div>
         `;
+
         ticker.appendChild(el);
-        tickerClone.appendChild(el.cloneNode(true)); // duplicate for infinite loop
         elements[symbol] = el;
-        sortStocksAlphabetically();
 
+        sortStocks();
+
+    } else {
+
+        const el = elements[symbol];
+        const symbolLtp = el.querySelector(".symbol-ltp");
+        const changeArrow = el.querySelector(".change-arrow");
+        const arrow = el.querySelector(".arrow");
+        const changeSpan = changeArrow.querySelector("span:last-child");
+
+        symbolLtp.textContent = `${symbol} ${ltp}`;
+        arrow.textContent = change >= 0 ? '▲' : '▼';
+        changeSpan.textContent = `${change >= 0 ? '+' + change : change} (${changePercent}%)`;
+
+        symbolLtp.className = `symbol-ltp ${colorClass}`;
+        changeArrow.className = `change-arrow ${colorClass}`;
     }
-    else {
-    const symbolEl = document.getElementById(`${symbol}-symbol-ltp`);
-    const arrowEl = document.getElementById(`${symbol}-arrow`);
-    const changeEl = document.getElementById(`${symbol}-change`);
-    const changeArrowDiv = arrowEl.parentNode;
-
-    symbolEl.innerText = `${symbol} ${ltp}`;
-
-    arrowEl.innerText = change >= 0 ? '▲' : '▼';
-    changeEl.innerText = `${change >= 0 ? '+' + change : change} (${changePercent}%)`;
-
-    symbolEl.className = `symbol-ltp ${colorClass}`;
-    changeArrowDiv.className = `change-arrow ${colorClass}`;
 }
-}
-// Batch updates every 1 second for smoothness
 
-function sortStocksAlphabetically() {
+// ---------------- Sorting + Clone Rebuild ----------------
+function sortStocks() {
+
     const items = Array.from(ticker.children);
 
-    items.sort((a, b) => a.id.localeCompare(b.id));
+    items.sort((a, b) => 
+        a.dataset.symbol.localeCompare(b.dataset.symbol)
+    );
 
+    ticker.innerHTML = "";
     items.forEach(item => ticker.appendChild(item));
 
-    // Also sort clone for smooth loop
+    // ✅ Rebuild clone WITHOUT duplicate IDs
     tickerClone.innerHTML = "";
-    items.forEach(item => tickerClone.appendChild(item.cloneNode(true)));
+
+    items.forEach(item => {
+        const clone = item.cloneNode(true);
+        tickerClone.appendChild(clone);
+    });
 }
-const pendingUpdates = {};
+
+// ---------------- Batch Updates (Smooth UI) ----------------
 setInterval(() => {
     for (const symbol in pendingUpdates) {
         const d = pendingUpdates[symbol];
@@ -175,11 +180,12 @@ setInterval(() => {
     Object.keys(pendingUpdates).forEach(k => delete pendingUpdates[k]);
 }, 1000);
 
-// Listen to WebSocket and queue updates
+// ---------------- Listen to Backend ----------------
 socket.on("stock_update", data => {
-    
+    console.log("📥 Received:", data);  // 👈 ADD THIS
     pendingUpdates[data.symbol] = data;
 });
 </script>
+
 </body>
 </html>

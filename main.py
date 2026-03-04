@@ -12,14 +12,8 @@ from kiteconnect.exceptions import TokenException
 app = Flask(__name__)
 from flask_socketio import SocketIO
 
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
 
-
-
-# Delete old token file if exists
-if os.path.exists("tokens.json"):
-    os.remove("tokens.json")
-    print("🗑️ Old token.json deleted — fetching new token")
 
 # ---------------- Save tokens file ----------------
 TOKEN_FILE = "tokens.json"
@@ -36,11 +30,9 @@ def load_tokens():
         with open(TOKEN_FILE, "r") as f:
             data = json.load(f)
 
-        # refresh daily
         if data["date"] == datetime.now().strftime("%Y-%m-%d"):
             print("✅ Using cached tokens")
-            return data["tokens"]
-
+            return {int(k): v for k, v in data["tokens"].items()}
     except:
         pass
 
@@ -56,7 +48,7 @@ if not API_KEY or not API_SECRET:
 
 # ---------------- Instrument Tokens ----------------
 TOKENS = {}
-
+ws_running = False
 #-----------------Tokens Loading ----------------
 def get_instrument_tokens():
     """Fetch latest instrument tokens from Zerodha in alphabetical order"""
@@ -142,57 +134,79 @@ def callback():
 
     try:
         generate_access_token(request_token)
-        threading.Thread(target=start_kite_ws, daemon=True).start()
+
+        # ✅ Correct way with eventlet
+        socketio.start_background_task(start_kite_ws)
+
         return "✅ Login successful. WebSocket started. You can now close this page."
     except Exception as e:
         return f"❌ Error: {e}"
-
+    
 # ---------------- Kite WebSocket ----------------
 def on_connect(ws, response):
     print("✅ Zerodha WebSocket Connected")
-    ws.subscribe(list(TOKENS.keys()))
-    ws.set_mode(ws.MODE_LTP, list(TOKENS.keys()))
+
+    tokens_list = list(map(int, TOKENS.keys()))
+
+    print("📡 Subscribing to", len(tokens_list), "tokens")
+
+    # small delay prevents frame corruption
+    import time
+    time.sleep(1)
+
+    ws.subscribe(tokens_list)
+    ws.set_mode(ws.MODE_QUOTE, tokens_list)
+
+    print("✅ Subscription sent successfully")
 
 def on_ticks(ws, ticks):
+    print("📊 Tick received:", len(ticks))
+
     for t in ticks:
         token = t["instrument_token"]
         symbol = TOKENS.get(token)
+
         if not symbol:
             continue
 
+        ltp = t.get("last_price", 0)
+        prev_close = t.get("ohlc", {}).get("close")
+
+        if not ltp or not prev_close:
+            continue
+
+        # ✅ Calculate absolute change
+        change = ltp - prev_close
+
+        # ✅ Calculate percentage change
+        change_percent = (change / prev_close) * 100
 
         payload = {
             "symbol": symbol,
-            "ltp": round(t.get("last_price", 0), 2),
-            "change": round(t.get("change", 0) or 0, 2),
-            "change_percent": round(t.get("change_percent", 0) or 0, 2)
+            "ltp": round(ltp, 2),
+            "change": round(change, 2),
+            "change_percent": round(change_percent, 2)
         }
 
+        print("📤 Emitting:", payload)
         socketio.emit("stock_update", payload)
-
+        
 def on_close(ws, code, reason):
+    global ws_running
     print("⚠️ WebSocket closed:", reason)
+    ws_running = False
 
 def on_error(ws, code, reason):
-    global TOKENS
+    global ws_running
     print("❌ WebSocket error:", reason)
-
-    print("🔄 Refreshing tokens and reconnecting...")
-
-    try:
-        TOKENS = get_instrument_tokens()
-        save_tokens(TOKENS)
-
-        ws.stop()
-
-        threading.Thread(target=start_kite_ws, daemon=True).start()
-
-    except Exception as e:
-        print("❌ Recovery failed:", e)
+    ws_running = False
 
 def start_kite_ws():
-    global TOKENS
-    global kws
+    global TOKENS, kws, ws_running
+
+    if ws_running:
+        print("⚠️ WebSocket already running. Skipping restart.")
+        return
 
     print("🚀 start_kite_ws() called")
 
@@ -200,18 +214,15 @@ def start_kite_ws():
     print("🔐 Access Token:", "FOUND" if access_token else "NOT FOUND")
 
     if not access_token:
-        print("❌ No access token, aborting WS")
+        print("❌ No access token found.")
         return
 
-    # Set access token first
     kite.set_access_token(access_token)
 
-    # ---------------- TOKEN LOADING (FIXED POSITION) ----------------
+    # -------- Load Tokens --------
     try:
-        # Try cached tokens first
         TOKENS = load_tokens()
 
-        # If not available → fetch fresh
         if not TOKENS:
             print("📥 Fetching fresh tokens...")
             TOKENS = get_instrument_tokens()
@@ -227,9 +238,8 @@ def start_kite_ws():
     except Exception as e:
         print("❌ Token loading failed:", e)
         return
-    # ---------------------------------------------------------------
+    # -----------------------------
 
-    # Start WebSocket
     kws = KiteTicker(API_KEY, access_token)
 
     kws.on_connect = on_connect
@@ -238,22 +248,20 @@ def start_kite_ws():
     kws.on_error = on_error
 
     print("📡 Connecting to Zerodha WebSocket...")
+    ws_running = True
+
     try:
-        kws.connect(threaded=True)
+        kws.connect()
     except TokenException:
         print("❌ Access token expired. Visit /login")
- 
- # ---------------- Main ----------------
+        ws_running = False
+
 if __name__ == "__main__":
-    print("🌐 Starting Flask App on http://0.0.0.0:8080")
+    print("🌐 Starting Flask App on http://127.0.0.1:8080")
+
     access_token = load_access_token()
 
     if access_token:
         threading.Thread(target=start_kite_ws, daemon=True).start()
-        print("🚀 WebSocket started automatically using saved token")
-    else:
-        print("⚠️ No access token found.")
-        # Automatically open default browser to login
-        webbrowser.open("http://127.0.0.1:8080/login")
 
-    socketio.run(app, host="0.0.0.0", port=8080)
+    socketio.run(app, host="127.0.0.1", port=8080, debug=True)
