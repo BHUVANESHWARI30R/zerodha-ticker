@@ -58,14 +58,13 @@ def get_instrument_tokens():
 
     required_symbols = [
         "ADANIENT","ADANIPORTS","APOLLOHOSP","ASIANPAINT","AXISBANK","BAJAJ-AUTO",
-        "BAJAJFINSV","BAJFINANCE","BPCL","BRITANNIA","CIPLA","COALINDIA",
-        "DABUR","DIVISLAB","DRREDDY","EICHERMOT","GRASIM","HCLTECH",
-        "HDFCBANK","HDFCLIFE","HEROMOTOCO","HINDALCO","HINDUNILVR","ICICIBANK",
-        "INDUSINDBK","INFY","IOC","ITC","JSWSTEEL","KOTAKBANK",
-        "LT","M&M","MARUTI","NESTLEIND","NTPC","ONGC",
-        "PIDILITIND","POWERGRID","RELIANCE","SBIN","SBILIFE","SHREECEM",
-        "SIEMENS","SUNPHARMA","TATAMOTORS","TATASTEEL","TECHM","TITAN",
-        "ULTRACEMCO","UPL","WIPRO"
+        "BAJFINANCE","BAJAJFINSV","BEL","BHARTIARTL","CIPLA","COALINDIA",
+        "DRREDDY","EICHERMOT","GRASIM","HCLTECH","HDFCBANK","HDFCLIFE",
+        "HINDALCO","HINDUNILVR","ICICIBANK","INDUSINDBK","INFY","ITC",
+        "JSWSTEEL","KOTAKBANK","LT","M&M","MARUTI","NESTLEIND",
+        "NTPC","ONGC","POWERGRID","RELIANCE","SBILIFE","SBIN",
+        "SHRIRAMFIN","SUNPHARMA","TATACONSUM","TATAMOTORS","TATASTEEL","TCS",
+        "TECHM","TITAN","TRENT","ULTRACEMCO","WIPRO","INDIGO","JIOFIN","MAXHEALTH"
     ]
 
     # 🔹 sort alphabetically
@@ -118,13 +117,15 @@ def generate_access_token(request_token):
     return access_token
 
 # ---------------- Routes ----------------
+
 @app.route("/")
 def index():
+    access_token = load_access_token()
+    if not access_token:
+        # Redirect user to Zerodha login page automatically
+        return redirect(kite.login_url())
     return render_template("index.html")
 
-@app.route("/login")
-def login():
-    return redirect(kite.login_url())
 
 @app.route("/callback")
 def callback():
@@ -135,7 +136,7 @@ def callback():
     try:
         generate_access_token(request_token)
 
-        # ✅ Correct way with eventlet
+        # ✅ Start WebSocket in background after login
         socketio.start_background_task(start_kite_ws)
 
         return "✅ Login successful. WebSocket started. You can now close this page."
@@ -257,11 +258,11 @@ def start_kite_ws():
         ws_running = False
 
 if __name__ == "__main__":
-    print("🌐 Starting Flask App on http://127.0.0.1:8080")
+    print("🌐 Starting Flask App on http://127.0.0.1:80")
 
     access_token = load_access_token()
 
     if access_token:
         threading.Thread(target=start_kite_ws, daemon=True).start()
 
-    socketio.run(app, host="127.0.0.1", port=8080, debug=True)
+    socketio.run(app, host="0.0.0.0", port=80, debug=True)
