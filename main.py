@@ -49,6 +49,8 @@ if not API_KEY or not API_SECRET:
 # ---------------- Instrument Tokens ----------------
 TOKENS = {}
 ws_running = False
+# ---------------- Latest Data Cache ----------------
+LATEST_DATA = {}
 #-----------------Tokens Loading ----------------
 def get_instrument_tokens():
     """Fetch latest instrument tokens from Zerodha in alphabetical order"""
@@ -143,6 +145,14 @@ def callback():
     except Exception as e:
         return f"❌ Error: {e}"
     
+# ---------------- Send Cached Data on Browser Connect ----------------
+@socketio.on("connect")
+def send_cached_data():
+    print("🌐 Browser connected. Sending cached stock data...")
+
+    for data in LATEST_DATA.values():
+        socketio.emit("stock_update", data)
+    
 # ---------------- Kite WebSocket ----------------
 def on_connect(ws, response):
     print("✅ Zerodha WebSocket Connected")
@@ -188,6 +198,8 @@ def on_ticks(ws, ticks):
             "change": round(change, 2),
             "change_percent": round(change_percent, 2)
         }
+
+        LATEST_DATA[symbol] = payload  # ✅ cache latest price
 
         print("📤 Emitting:", payload)
         socketio.emit("stock_update", payload)
@@ -265,4 +277,4 @@ if __name__ == "__main__":
     if access_token:
         threading.Thread(target=start_kite_ws, daemon=True).start()
 
-    socketio.run(app, host="0.0.0.0", port=80, debug=True)
+    socketio.run(app, host="0.0.0.0", port=8080, debug=True)
