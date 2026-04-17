@@ -129,7 +129,7 @@ def index():
     return render_template("index.html")
 
 @app.route("/iim-ranchi")
-def index():
+def iimranchi():
     access_token = load_access_token()
     if not access_token:
         # Redirect user to Zerodha login page automatically
