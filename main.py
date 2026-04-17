@@ -128,6 +128,14 @@ def index():
         return redirect(kite.login_url())
     return render_template("index.html")
 
+@app.route("/iim-ranchi")
+def index():
+    access_token = load_access_token()
+    if not access_token:
+        # Redirect user to Zerodha login page automatically
+        return redirect(kite.login_url())
+    return render_template("iim-ranchi.html")
+
 
 @app.route("/callback")
 def callback():
@@ -277,4 +285,4 @@ if __name__ == "__main__":
     if access_token:
         threading.Thread(target=start_kite_ws, daemon=True).start()
 
-    socketio.run(app, host="0.0.0.0", port=80, debug=True)
+    socketio.run(app, host="0.0.0.0", port=8080, debug=True)
