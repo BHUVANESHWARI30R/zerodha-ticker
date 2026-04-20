@@ -283,14 +283,28 @@ socket.on("stock_update", data => {
 });
 // ---------------- Smooth JS-based ticker (SYNCED) ----------------
 const SPEED = 180;
-const LOOP_WIDTH = 2048;
 
-function animate() {
-    const now = Date.now() / 1000;
+let lastTime = performance.now();
+let position = 0;
 
-    const position = now * SPEED;
+// sync start position
+const startTime = Date.now() / 1000;
+position = startTime * SPEED;
 
-    const x = -(position % LOOP_WIDTH);
+function animate(now) {
+    const delta = (now - lastTime) / 1000;
+    lastTime = now;
+
+    position += SPEED * delta;
+
+    const totalWidth = wrapper.scrollWidth / 2;
+
+    if (!totalWidth || totalWidth < 50) {
+        requestAnimationFrame(animate);
+        return;
+    }
+
+    const x = -(position % totalWidth);
 
     wrapper.style.transform = `translate3d(${x}px,0,0)`;
 
