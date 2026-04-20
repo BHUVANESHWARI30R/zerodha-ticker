@@ -28,9 +28,7 @@ body {
 }
 
 .ticker-wrapper {
-    display: flex;
-    width: max-content;
-    animation: scroll 80s linear infinite;
+    will-change: transform;
 }
 
 @keyframes scroll {
@@ -156,6 +154,12 @@ const tickerClone = document.getElementById("ticker-clone");
 const elements = {};
 const pendingUpdates = {};
 
+
+function isVisible(el) {
+    const rect = el.getBoundingClientRect();
+    return rect.right > 0 && rect.left < window.innerWidth;
+}
+
 // ✅ Connection Debug
 socket.on("connect", () => {
     console.log("✅ Connected to backend");
@@ -209,22 +213,21 @@ ticker.appendChild(el);
 
     const el = elements[symbol];
 
-    // Get both symbol-ltp blocks
-    const symbolBlocks = el.querySelectorAll(".symbol-ltp");
+    // ❗ Skip update if visible (prevents jitter)
+    if (isVisible(el)) return;
 
-    // First = symbol, Second = price
+    const symbolBlocks = el.querySelectorAll(".symbol-ltp");
     const priceBlock = symbolBlocks[1];
 
-    // Change section
     const changeArrow = el.querySelector(".change-arrow");
 
-    const percentDiv = changeArrow.children[0]; // (%)
+    const percentDiv = changeArrow.children[0];
     const changeRow = changeArrow.children[1];
 
     const arrow = changeRow.querySelector(".arrow");
     const changeSpan = changeRow.querySelector("span:last-child");
 
-    // ✅ Update values
+    // ✅ Update values ONLY when off-screen
     priceBlock.textContent = ltp;
     percentDiv.textContent = `(${changePercent}%)`;
     arrow.textContent = change >= 0 ? '▲' : '▼';
