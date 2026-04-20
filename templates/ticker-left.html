@@ -28,6 +28,8 @@ body {
 }
 
 .ticker-wrapper {
+    width: max-content;
+display: flex;
     will-change: transform;
     transform: translate3d(0,0,0);
     backface-visibility: hidden;
@@ -276,11 +278,10 @@ socket.on("stock_update", data => {
     pendingUpdates[data.symbol] = data;
 });
 // ---------------- Smooth JS-based ticker (SYNCED) ----------------
-
-const SPEED = 30; // px/sec
+const SPEED = 25;
 const RIGHT_WIDTH = 2048;
 
-const isLeftScreen = true; // change per screen
+const isLeftScreen = true;
 
 const wrapper = document.querySelector(".ticker-wrapper");
 const baseOffset = isLeftScreen ? -RIGHT_WIDTH : 0;
@@ -288,29 +289,34 @@ const baseOffset = isLeftScreen ? -RIGHT_WIDTH : 0;
 let lastTime = performance.now();
 let position = 0;
 
-// sync initial position (IMPORTANT)
+// sync start position
 const startTime = Date.now() / 1000;
-position = (startTime * SPEED);
+position = startTime * SPEED;
 
 function animate(now) {
-    const delta = (now - lastTime) / 1000; // seconds
+    const delta = (now - lastTime) / 1000;
     lastTime = now;
 
     position += SPEED * delta;
 
     const totalWidth = wrapper.scrollWidth / 2;
 
+    if (totalWidth === 0) {
+        requestAnimationFrame(animate);
+        return;
+    }
+
     const x = baseOffset - (position % totalWidth);
 
-    wrapper.style.transform = `translate3d(${x}px, 0, 0)`;
+    wrapper.style.transform = `translate3d(${x}px,0,0)`;
 
     requestAnimationFrame(animate);
 }
 
-requestAnimationFrame(animate);
-
-// start animation
-animate();
+// wait for DOM + render
+setTimeout(() => {
+    requestAnimationFrame(animate);
+}, 200);
 </script>
 
 </body>
