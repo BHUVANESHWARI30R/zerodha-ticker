@@ -139,7 +139,7 @@ def iimranchi():
 
 
 @app.route("/iim-ranchi-ticker")
-def iimranchi():
+def iimranchiticker():
     access_token = load_access_token()
     if not access_token:
         # Redirect user to Zerodha login page automatically
