@@ -30,8 +30,8 @@ body {
 .ticker-wrapper {
     display: flex;
     width: max-content;
-    --start-offset: 0px;
-    animation: scroll 80s linear infinite;
+    will-change: transform;
+    transform: translateZ(0);
 }
 
 
@@ -158,6 +158,8 @@ const tickerClone = document.getElementById("ticker-clone");
 const elements = {};
 const pendingUpdates = {};
 
+
+
 // ✅ Connection Debug
 socket.on("connect", () => {
     console.log("✅ Connected to backend");
@@ -240,13 +242,7 @@ ticker.appendChild(el);
 }
 
 
-const startTime = Date.now();
-const duration = 80000; // 80s
 
-const elapsed = startTime % duration;
-const delay = -(elapsed / 1000);
-
-document.querySelector(".ticker-wrapper").style.animationDelay = delay + "s";
 // ---------------- Sorting + Clone Rebuild ----------------
 function sortStocks() {
 
@@ -282,6 +278,36 @@ socket.on("stock_update", data => {
     console.log("📥 Received:", data);  // 👈 ADD THIS
     pendingUpdates[data.symbol] = data;
 });
+
+// ---------------- Smooth JS-based ticker (SYNCED) ----------------
+
+// ⚙️ CONFIG
+const SPEED = 60; // pixels per second (adjust for speed)
+const RIGHT_WIDTH = 2048; // width of right screen
+
+// 👇 CHANGE THIS PER FILE
+//const isLeftScreen = true;  // LEFT screen = true
+const isLeftScreen = false; // RIGHT screen = false
+
+const wrapper = document.querySelector(".ticker-wrapper");
+
+// base offset
+const baseOffset = isLeftScreen ? -RIGHT_WIDTH : 0;
+
+// animation loop
+function animate() {
+    const now = Date.now() / 1000; // seconds
+    const totalWidth = wrapper.scrollWidth / 2; // because of clone
+
+const x = baseOffset - ((now * SPEED) % totalWidth);
+
+    wrapper.style.transform = `translateX(${x}px)`;
+
+    requestAnimationFrame(animate);
+}
+
+// start animation
+animate();
 </script>
 
 </body>

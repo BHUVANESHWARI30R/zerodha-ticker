@@ -28,10 +28,10 @@ body {
 }
 
 .ticker-wrapper {
-    display: flex;    
-     width: max-content;  
-    --start-offset: -2055px; /* 🔥 EXACT width of RIGHT screen */
-    animation: scroll 80s linear infinite;
+    display: flex;
+    width: max-content;
+    will-change: transform;
+    transform: translateZ(0);
 }
 
 @keyframes scroll {
@@ -282,6 +282,35 @@ socket.on("stock_update", data => {
     console.log("📥 Received:", data);  // 👈 ADD THIS
     pendingUpdates[data.symbol] = data;
 });
+// ---------------- Smooth JS-based ticker (SYNCED) ----------------
+
+// ⚙️ CONFIG
+const SPEED = 60; // pixels per second (adjust for speed)
+const RIGHT_WIDTH = 2048; // width of right screen
+
+// 👇 CHANGE THIS PER FILE
+const isLeftScreen = true;  // LEFT screen = true
+// const isLeftScreen = false; // RIGHT screen = false
+
+const wrapper = document.querySelector(".ticker-wrapper");
+
+// base offset
+const baseOffset = isLeftScreen ? -RIGHT_WIDTH : 0;
+
+// animation loop
+function animate() {
+    const now = Date.now() / 1000; // seconds
+    const totalWidth = wrapper.scrollWidth / 2; // because of clone
+
+const x = baseOffset - ((now * SPEED) % totalWidth);
+
+    wrapper.style.transform = `translateX(${x}px)`;
+
+    requestAnimationFrame(animate);
+}
+
+// start animation
+animate();
 </script>
 
 </body>
