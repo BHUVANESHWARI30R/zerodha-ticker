@@ -166,6 +166,9 @@ socket.on("connect", () => {
     console.log("✅ Connected to backend");
 });
 
+// run ONLY ONCE
+setInterval(sortStocks, 5000);
+
 // ---------------- Create or Update Stock ----------------
 function addOrUpdateStock(symbol, ltp, change, changePercent) {
 
@@ -208,7 +211,7 @@ function addOrUpdateStock(symbol, ltp, change, changePercent) {
 ticker.appendChild(el);
         elements[symbol] = el;
 
-        sortStocks();
+        
 
     } else {
 
@@ -249,25 +252,19 @@ function sortStocks() {
 
     const items = Array.from(ticker.children);
 
-    items.sort((a, b) => 
+    items.sort((a, b) =>
         a.dataset.symbol.localeCompare(b.dataset.symbol)
     );
 
     ticker.innerHTML = "";
     items.forEach(item => ticker.appendChild(item));
 
-   
-
     tickerClone.innerHTML = "";
-
-    // repeat content multiple times
-    for (let i = 0; i < 3; i++) {
-        items.forEach(item => {
-            const clone = item.cloneNode(true);
-            tickerClone.appendChild(clone);
-        });
-    }
+    items.forEach(item => {
+        tickerClone.appendChild(item.cloneNode(true));
+    });
 }
+
 
 // ---------------- Batch Updates (Smooth UI) ----------------
 setInterval(() => {
@@ -285,34 +282,32 @@ socket.on("stock_update", data => {
 });
 
 // ---------------- Smooth JS-based ticker (SYNCED) ----------------
+
+
 const SPEED = 160;
 
-let lastTime = performance.now();
-let position = 0;
+// lock to global time (same across screens)
+function getPosition() {
+    return Date.now() / 1000 * SPEED;
+}
 
-// sync start position
-const startTime = Date.now() / 1000;
-position = startTime * SPEED;
-
-function animate(now) {
-    const delta = (now - lastTime) / 1000;
-    lastTime = now;
-
-    position += SPEED * delta;
+function animate() {
 
     const totalWidth = ticker.scrollWidth;
 
-    if (!totalWidth || totalWidth < 50) {
+    if (!totalWidth) {
         requestAnimationFrame(animate);
         return;
     }
 
+    const position = getPosition();
     const x = -(position % totalWidth);
 
     wrapper.style.transform = `translate3d(${x}px,0,0)`;
 
     requestAnimationFrame(animate);
 }
+
 
 // wait until content exists
 function waitForContent() {
@@ -325,7 +320,7 @@ function waitForContent() {
 
 waitForContent();
 
-
+console.log("WIDTH:", ticker.scrollWidth);
 
 </script>
 
