@@ -146,13 +146,21 @@ def iimranchiticker():
         return redirect(kite.login_url())
     return render_template("iim-ranchi-ticker.html")
 
-@app.route("/iim-left")
-def iim_left():
-    return render_template("iim-left.html")
+@app.route("/ticker-left")
+def tickerleft():
+    access_token = load_access_token()
+    if not access_token:
+        # Redirect user to Zerodha login page automatically
+        return redirect(kite.login_url())
+    return render_template("ticker-left.html")
 
-@app.route("/iim-right")
-def iim_right():
-    return render_template("iim-right.html")
+@app.route("/ticker-right")
+def tickerright():
+    access_token = load_access_token()
+    if not access_token:
+        # Redirect user to Zerodha login page automatically
+        return redirect(kite.login_url())
+    return render_template("ticker-right.html")
 
 @app.route("/callback")
 def callback():
