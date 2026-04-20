@@ -155,6 +155,7 @@ const tickerClone = document.getElementById("ticker-clone");
 
 const elements = {};
 const pendingUpdates = {};
+const cloneElements = {};
 
 
 function isFullyVisible(el) {
@@ -269,8 +270,35 @@ function sortStocks() {
 
     items.forEach(item => {
         const clone = item.cloneNode(true);
-        tickerClone.appendChild(clone);
+tickerClone.appendChild(clone);
+
+// map clone using symbol
+cloneElements[item.dataset.symbol] = clone;
     });
+}
+const cloneEl = cloneElements[symbol];
+
+if (cloneEl) {
+
+    const symbolBlocks = cloneEl.querySelectorAll(".symbol-ltp");
+    const priceBlock = symbolBlocks[1];
+
+    const changeArrow = cloneEl.querySelector(".change-arrow");
+
+    const percentDiv = changeArrow.children[0];
+    const changeRow = changeArrow.children[1];
+
+    const arrow = changeRow.querySelector(".arrow");
+    const changeSpan = changeRow.querySelector("span:last-child");
+
+    priceBlock.textContent = ltp;
+    percentDiv.textContent = `(${changePercent}%)`;
+    arrow.textContent = change >= 0 ? '▲' : '▼';
+    changeSpan.textContent = change >= 0 ? '+' + change : change;
+
+    symbolBlocks[0].className = `symbol-ltp ${colorClass}`;
+    symbolBlocks[1].className = `symbol-ltp ${colorClass}`;
+    changeArrow.className = `change-arrow ${colorClass}`;
 }
 
 // ---------------- Batch Updates (Smooth UI) ----------------
