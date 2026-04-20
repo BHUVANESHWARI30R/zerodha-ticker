@@ -30,7 +30,7 @@ body {
 .ticker-wrapper {
     display: flex;
     width: max-content;
-    animation: scroll 60s linear infinite;
+    animation: scroll 50s linear infinite;
 }
 
 @keyframes scroll {
@@ -252,13 +252,15 @@ ticker.appendChild(el);
 
 
 function applySync() {
-    const duration = 60000;
+    const duration = 50000;
 
     const now = getSyncedTime();
     const offset = now % duration;
 
+    const screenOffset = duration * (2176 / 4224);
+
     document.querySelector(".ticker-wrapper").style.animationDelay =
-        `-${offset}ms`;
+        `-${offset + screenOffset}ms`;
 }
 // ---------------- Sorting + Clone Rebuild ----------------
 function sortStocks() {
