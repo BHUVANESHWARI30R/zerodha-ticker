@@ -17,36 +17,39 @@ body {
     overflow: hidden;
 }
 
-
-
 .ticker-container {
     width: 100%;
-    height: 240px;   /* 2 rows visible */
+    height: 240px;
     overflow: hidden;
     background: black;
 }
 
+
+/* each row */
+.ticker-row {
+    display: flex;
+    height: 120px;
+}
+
+/* each stock = fixed 5 per row */
+.stock {
+    width: 20%;   /* 🔥 5 per row */
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0 10px;
+    box-sizing: border-box;
+}
+
+
+
+/* scrolling whole block */
 .ticker-track {
     display: flex;
     flex-direction: column;
-    flex-wrap: wrap;
-
-    height: 240px;     /* 2 rows visible */
-    width: max-content;
-
-    align-content: flex-start;  /* 🔥 IMPORTANT FIX */
-
-    animation: scroll 80s linear infinite;
+    animation: scroll 60s linear infinite;
 }
-.stock {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
 
-    min-width: 260px;
-    height: 120px;   /* 🔥 CRITICAL for row alignment */
-    margin-right: 80px;
-}
 
 /* keep your existing stock styles unchanged */
 
@@ -165,6 +168,22 @@ socket.on("connect", () => {
     console.log("✅ Connected to backend");
 });
 
+
+let stockCount = 0;
+
+function getOrCreateRow(rowIndex) {
+
+    let row = document.querySelector(`[data-row="${rowIndex}"]`);
+
+    if (!row) {
+        row = document.createElement("div");
+        row.className = "ticker-row";
+        row.dataset.row = rowIndex;
+        ticker.appendChild(row);
+    }
+
+    return row;
+}
 // ---------------- Create or Update Stock ----------------
 function addOrUpdateStock(symbol, ltp, change, changePercent) {
 
@@ -204,7 +223,9 @@ function addOrUpdateStock(symbol, ltp, change, changePercent) {
 
                 </div>
             `;
-ticker.appendChild(el);
+        const rowIndex = Math.floor(Object.keys(elements).length / 5);
+        const row = getOrCreateRow(rowIndex);
+        row.appendChild(el);
         elements[symbol] = el;
 
         sortStocks();
@@ -244,17 +265,22 @@ ticker.appendChild(el);
 // ---------------- Sorting + Clone Rebuild ----------------
 function sortStocks() {
 
-    const items = Array.from(ticker.children);
+    const allStocks = Array.from(document.querySelectorAll(".stock"));
 
-    items.sort((a, b) => 
+    allStocks.sort((a, b) =>
         a.dataset.symbol.localeCompare(b.dataset.symbol)
     );
 
-    ticker.innerHTML = "";
-    items.forEach(item => ticker.appendChild(item));
+    // clear all rows
+    document.querySelectorAll(".ticker-row").forEach(r => r.remove());
 
-  
-   
+    stockCount = 0;
+
+    allStocks.forEach(stock => {
+        const row = getOrCreateRow(stockCount);
+        row.appendChild(stock);
+        stockCount++;
+    });
 }
 
 // ---------------- Batch Updates (Smooth UI) ----------------
