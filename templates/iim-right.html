@@ -257,7 +257,7 @@ function applySync() {
     const now = getSyncedTime();
     const offset = now % duration;
 
-    const screenOffset = duration * (2176 / 4224);
+    const screenOffset = duration * (2176 / 4224) * 0.5;
 
     document.querySelector(".ticker-wrapper").style.animationDelay =
         `-${offset + screenOffset}ms`;
