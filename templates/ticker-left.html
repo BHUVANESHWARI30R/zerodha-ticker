@@ -282,7 +282,7 @@ socket.on("stock_update", data => {
     pendingUpdates[data.symbol] = data;
 });
 // ---------------- Smooth JS-based ticker (SYNCED) ----------------
-const SPEED = 160;
+const SPEED = 180;
 
 let lastTime = performance.now();
 let position = 0;
