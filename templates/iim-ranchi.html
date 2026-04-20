@@ -19,48 +19,38 @@ body {
 
 .ticker-container {
     width: 100%;
-    height: 240px;
-    overflow: hidden;
-    background: black;
-}
-
-
-/* each row */
-.ticker-row {
-    display: flex;
     height: 120px;
-}
-
-/* each stock = fixed 5 per row */
-.stock {
-    width: 20%;   /* 🔥 5 per row */
+    overflow: hidden;
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: 0 10px;
-    box-sizing: border-box;
+    background: #000;
+    padding-top: 2px;
 }
 
-
-
-/* scrolling whole block */
-.ticker-track {
+.ticker-wrapper {
     display: flex;
-    flex-direction: column;
-    animation: scroll 60s linear infinite;
+    width: max-content;
+    animation: scroll 80s linear infinite;
 }
-
-
-/* keep your existing stock styles unchanged */
 
 @keyframes scroll {
     0% { transform: translateX(0); }
     100% { transform: translateX(-50%); }
 }
 
+.ticker {
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+}
 
-
-
+.stock {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-right: 80px;
+    min-width: 260px;   /* ✅ INCREASE WIDTH */
+}
 .symbol {
     font-size: 55px;
     font-weight: bold;
@@ -152,13 +142,16 @@ body {
 <body>
 
 <div class="ticker-container">
-    <div class="ticker-track" id="ticker"></div>
+    <div class="ticker-wrapper">
+        <div class="ticker" id="ticker"></div>
+        <div class="ticker" id="ticker-clone"></div>
+    </div>
 </div>
 
 <script>
 const socket = io();
 const ticker = document.getElementById("ticker");
-
+const tickerClone = document.getElementById("ticker-clone");
 
 const elements = {};
 const pendingUpdates = {};
@@ -168,22 +161,6 @@ socket.on("connect", () => {
     console.log("✅ Connected to backend");
 });
 
-
-let stockCount = 0;
-
-function getOrCreateRow(rowIndex) {
-
-    let row = document.querySelector(`[data-row="${rowIndex}"]`);
-
-    if (!row) {
-        row = document.createElement("div");
-        row.className = "ticker-row";
-        row.dataset.row = rowIndex;
-        ticker.appendChild(row);
-    }
-
-    return row;
-}
 // ---------------- Create or Update Stock ----------------
 function addOrUpdateStock(symbol, ltp, change, changePercent) {
 
@@ -223,9 +200,7 @@ function addOrUpdateStock(symbol, ltp, change, changePercent) {
 
                 </div>
             `;
-        const rowIndex = Math.floor(Object.keys(elements).length / 5);
-        const row = getOrCreateRow(rowIndex);
-        row.appendChild(el);
+ticker.appendChild(el);
         elements[symbol] = el;
 
         sortStocks();
@@ -265,21 +240,21 @@ function addOrUpdateStock(symbol, ltp, change, changePercent) {
 // ---------------- Sorting + Clone Rebuild ----------------
 function sortStocks() {
 
-    const allStocks = Array.from(document.querySelectorAll(".stock"));
+    const items = Array.from(ticker.children);
 
-    allStocks.sort((a, b) =>
+    items.sort((a, b) => 
         a.dataset.symbol.localeCompare(b.dataset.symbol)
     );
 
-    // clear all rows
-    document.querySelectorAll(".ticker-row").forEach(r => r.remove());
+    ticker.innerHTML = "";
+    items.forEach(item => ticker.appendChild(item));
 
-    stockCount = 0;
+    // ✅ Rebuild clone WITHOUT duplicate IDs
+    tickerClone.innerHTML = "";
 
-    allStocks.forEach(stock => {
-        const row = getOrCreateRow(stockCount);
-        row.appendChild(stock);
-        stockCount++;
+    items.forEach(item => {
+        const clone = item.cloneNode(true);
+        tickerClone.appendChild(clone);
     });
 }
 
