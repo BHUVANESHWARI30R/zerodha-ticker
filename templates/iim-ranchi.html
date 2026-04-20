@@ -270,12 +270,18 @@ function sortStocks() {
 
 // ---------------- Batch Updates (Smooth UI) ----------------
 setInterval(() => {
+
+    console.log("⏳ Applying batch update...");
+
     for (const symbol in pendingUpdates) {
         const d = pendingUpdates[symbol];
         addOrUpdateStock(symbol, d.ltp, d.change, d.change_percent);
     }
+
+    // clear buffer
     Object.keys(pendingUpdates).forEach(k => delete pendingUpdates[k]);
-}, 1000);
+
+}, 60000); // 🔥 60 seconds
 
 // ---------------- Listen to Backend ----------------
 socket.on("stock_update", data => {
