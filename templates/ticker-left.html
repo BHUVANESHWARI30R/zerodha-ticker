@@ -284,25 +284,18 @@ socket.on("stock_update", data => {
 // ---------------- Smooth JS-based ticker (SYNCED) ----------------
 const SPEED = 180;
 
-let lastTime = performance.now();
-let position = 0;
+function animate() {
 
-// sync start position
-const startTime = Date.now() / 1000;
-position = startTime * SPEED;
+    const now = Date.now() / 1000;   // global time (same across screens)
 
-function animate(now) {
-    const delta = (now - lastTime) / 1000;
-    lastTime = now;
-
-    position += SPEED * delta;
-
-    const totalWidth = wrapper.scrollWidth / 2;
+    const totalWidth = ticker.scrollWidth;
 
     if (!totalWidth || totalWidth < 50) {
         requestAnimationFrame(animate);
         return;
     }
+
+    const position = now * SPEED;
 
     const x = -(position % totalWidth);
 
@@ -311,18 +304,7 @@ function animate(now) {
     requestAnimationFrame(animate);
 }
 
-// wait until content exists
-function waitForContent() {
-    if (wrapper.scrollWidth > 100) {
-        requestAnimationFrame(animate);
-    } else {
-        setTimeout(waitForContent, 100);
-    }
-}
-
 waitForContent();
-
-
 </script>
 
 </body>
