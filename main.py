@@ -10,6 +10,7 @@ from kiteconnect.exceptions import TokenException
 
 # ---------------- Flask Setup ----------------
 app = Flask(__name__)
+
 from flask_socketio import SocketIO
 
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
@@ -159,17 +160,28 @@ def callback():
         return "✅ Login successful. WebSocket started. You can now close this page."
     except Exception as e:
         return f"❌ Error: {e}"
-    
+
+
+import time
+
+def send_time_sync():
+    while True:
+        socketio.emit("sync_time", {
+            "server_time": int(time.time() * 1000)
+        })
+        socketio.sleep(2)  # send every 5 seconds
+
 # ---------------- Send Cached Data on Browser Connect ----------------
+import time
+
 @socketio.on("connect")
 def send_cached_data():
     print("🌐 Browser connected. Sending cached stock data...")
 
-    # ✅ SEND SERVER TIME (VERY IMPORTANT)
+    # ✅ SAME TIME SOURCE AS SYNC LOOP
     socketio.emit("sync_time", {
-        "server_time": datetime.now().timestamp() * 1000
+        "server_time": int(time.time() * 1000)
     })
-
     # send existing stock data
     for data in LATEST_DATA.values():
         socketio.emit("stock_update", data)
@@ -291,6 +303,7 @@ def start_kite_ws():
         ws_running = False
 
 if __name__ == "__main__":
+    socketio.start_background_task(send_time_sync)
     print("🌐 Starting Flask App on http://127.0.0.1:80")
 
     access_token = load_access_token()

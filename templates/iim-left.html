@@ -296,14 +296,7 @@ socket.on("stock_update", data => {
     pendingUpdates[data.symbol] = data;
 });
 
-// ===== LEFT SCREEN SYNC =====
-const duration = 60000; // 60 seconds (same as animation)
 
-const now = Date.now();
-const offset = now % duration;
-
-// apply delay so both screens sync
-document.querySelector(".ticker-wrapper").style.animationDelay = `-${offset}ms`;
 </script>
 
 </body>
