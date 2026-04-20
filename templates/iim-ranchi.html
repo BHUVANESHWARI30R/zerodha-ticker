@@ -26,16 +26,26 @@ body {
     background: black;
 }
 
-/* 🔥 THIS is the ONLY important change */
 .ticker-track {
     display: flex;
-    flex-wrap: wrap;
     flex-direction: column;
+    flex-wrap: wrap;
 
-    height: 240px;     /* number of rows controlled here */
+    height: 240px;     /* 2 rows visible */
     width: max-content;
 
+    align-content: flex-start;  /* 🔥 IMPORTANT FIX */
+
     animation: scroll 80s linear infinite;
+}
+.stock {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+
+    min-width: 260px;
+    height: 120px;   /* 🔥 CRITICAL for row alignment */
+    margin-right: 80px;
 }
 
 /* keep your existing stock styles unchanged */
@@ -47,13 +57,7 @@ body {
 
 
 
-.stock {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-right: 80px;
-    min-width: 260px;   /* ✅ INCREASE WIDTH */
-}
+
 .symbol {
     font-size: 55px;
     font-weight: bold;
@@ -151,7 +155,7 @@ body {
 <script>
 const socket = io();
 const ticker = document.getElementById("ticker");
-const tickerClone = document.getElementById("ticker-clone");
+
 
 const elements = {};
 const pendingUpdates = {};
@@ -249,13 +253,8 @@ function sortStocks() {
     ticker.innerHTML = "";
     items.forEach(item => ticker.appendChild(item));
 
-    // ✅ Rebuild clone WITHOUT duplicate IDs
-    tickerClone.innerHTML = "";
-
-    items.forEach(item => {
-        const clone = item.cloneNode(true);
-        tickerClone.appendChild(clone);
-    });
+  
+   
 }
 
 // ---------------- Batch Updates (Smooth UI) ----------------
