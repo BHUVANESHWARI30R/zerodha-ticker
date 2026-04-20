@@ -30,7 +30,7 @@ body {
 .ticker-wrapper {
     display: flex;
     width: max-content;
-    animation: scroll 80s linear infinite;
+    animation: scroll 60s linear infinite;
 }
 
 @keyframes scroll {
@@ -274,7 +274,7 @@ socket.on("stock_update", data => {
 });
 
 // ===== LEFT SCREEN SYNC =====
-const duration = 80000; // 80 seconds (same as animation)
+const duration = 60000; // 60 seconds (same as animation)
 
 const now = Date.now();
 const offset = now % duration;
