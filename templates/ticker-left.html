@@ -28,10 +28,9 @@ body {
 }
 
 .ticker-wrapper {
-    display: flex;
-    width: max-content;
     will-change: transform;
-    transform: translateZ(0);
+    transform: translate3d(0,0,0);
+    backface-visibility: hidden;
 }
 
 @keyframes scroll {
@@ -239,13 +238,7 @@ ticker.appendChild(el);
 }
 
 
-const startTime = Date.now();
-const duration = 80000; // 80s
 
-const elapsed = startTime % duration;
-const delay = -(elapsed / 1000);
-
-document.querySelector(".ticker-wrapper").style.animationDelay = delay + "s";
 
 // ---------------- Sorting + Clone Rebuild ----------------
 function sortStocks() {
@@ -284,30 +277,37 @@ socket.on("stock_update", data => {
 });
 // ---------------- Smooth JS-based ticker (SYNCED) ----------------
 
-// ⚙️ CONFIG
-const SPEED = 60; // pixels per second (adjust for speed)
-const RIGHT_WIDTH = 2048; // width of right screen
+const SPEED = 60; // px/sec
+const RIGHT_WIDTH = 2048;
 
-// 👇 CHANGE THIS PER FILE
-const isLeftScreen = true;  // LEFT screen = true
-// const isLeftScreen = false; // RIGHT screen = false
+const isLeftScreen = true; // change per screen
 
 const wrapper = document.querySelector(".ticker-wrapper");
-
-// base offset
 const baseOffset = isLeftScreen ? -RIGHT_WIDTH : 0;
 
-// animation loop
-function animate() {
-    const now = Date.now() / 1000; // seconds
-    const totalWidth = wrapper.scrollWidth / 2; // because of clone
+let lastTime = performance.now();
+let position = 0;
 
-const x = baseOffset - ((now * SPEED) % totalWidth);
+// sync initial position (IMPORTANT)
+const startTime = Date.now() / 1000;
+position = (startTime * SPEED);
 
-    wrapper.style.transform = `translateX(${x}px)`;
+function animate(now) {
+    const delta = (now - lastTime) / 1000; // seconds
+    lastTime = now;
+
+    position += SPEED * delta;
+
+    const totalWidth = wrapper.scrollWidth / 2;
+
+    const x = baseOffset - (position % totalWidth);
+
+    wrapper.style.transform = `translate3d(${x}px, 0, 0)`;
 
     requestAnimationFrame(animate);
 }
+
+requestAnimationFrame(animate);
 
 // start animation
 animate();
