@@ -136,6 +136,13 @@ def iimranchi():
         return redirect(kite.login_url())
     return render_template("iim-ranchi.html")
 
+@app.route("/iim-left")
+def iim_left():
+    return render_template("iim-left.html")
+
+@app.route("/iim-right")
+def iim_right():
+    return render_template("iim-right.html")
 
 @app.route("/callback")
 def callback():
