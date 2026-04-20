@@ -163,6 +163,8 @@ socket.on("connect", () => {
     console.log("✅ Connected to backend");
 });
 
+const wrapper = document.querySelector(".ticker-wrapper");
+
 // ---------------- Create or Update Stock ----------------
 function addOrUpdateStock(symbol, ltp, change, changePercent) {
 
@@ -254,13 +256,15 @@ function sortStocks() {
     ticker.innerHTML = "";
     items.forEach(item => ticker.appendChild(item));
 
-    // ✅ Rebuild clone WITHOUT duplicate IDs
     tickerClone.innerHTML = "";
 
+// repeat content multiple times
+for (let i = 0; i < 3; i++) {
     items.forEach(item => {
         const clone = item.cloneNode(true);
         tickerClone.appendChild(clone);
     });
+}
 }
 
 // ---------------- Batch Updates (Smooth UI) ----------------
@@ -278,13 +282,7 @@ socket.on("stock_update", data => {
     pendingUpdates[data.symbol] = data;
 });
 // ---------------- Smooth JS-based ticker (SYNCED) ----------------
-const SPEED = 120;
-const RIGHT_WIDTH = 2176;
-
-const isLeftScreen = true;
-
-const wrapper = document.querySelector(".ticker-wrapper");
-const baseOffset = isLeftScreen ? -RIGHT_WIDTH : 0;
+const SPEED = 160;
 
 let lastTime = performance.now();
 let position = 0;
@@ -301,22 +299,30 @@ function animate(now) {
 
     const totalWidth = wrapper.scrollWidth / 2;
 
-    if (totalWidth === 0) {
+    if (!totalWidth || totalWidth < 50) {
         requestAnimationFrame(animate);
         return;
     }
 
-    const x = baseOffset - (position % totalWidth);
+    const x = -(position % totalWidth);
 
     wrapper.style.transform = `translate3d(${x}px,0,0)`;
 
     requestAnimationFrame(animate);
 }
 
-// wait for DOM + render
-setTimeout(() => {
-    requestAnimationFrame(animate);
-}, 200);
+// wait until content exists
+function waitForContent() {
+    if (wrapper.scrollWidth > 100) {
+        requestAnimationFrame(animate);
+    } else {
+        setTimeout(waitForContent, 100);
+    }
+}
+
+waitForContent();
+
+
 </script>
 
 </body>
