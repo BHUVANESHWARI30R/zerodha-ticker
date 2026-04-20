@@ -252,15 +252,13 @@ ticker.appendChild(el);
 
 
 function applySync() {
-    const duration = 50000;
+    const duration = 60000;
 
     const now = getSyncedTime();
     const offset = now % duration;
 
-    const screenOffset = duration * (2176 / 4224)+120;
-
     document.querySelector(".ticker-wrapper").style.animationDelay =
-        `-${offset + screenOffset}ms`;
+        `-${offset}ms`;
 }
 // ---------------- Sorting + Clone Rebuild ----------------
 function sortStocks() {
