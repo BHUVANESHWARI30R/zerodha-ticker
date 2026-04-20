@@ -30,7 +30,7 @@ body {
 .ticker-wrapper {
     display: flex;    
      width: max-content;  
-    --start-offset: -2048px; /* 🔥 EXACT width of RIGHT screen */
+    --start-offset: -2055px; /* 🔥 EXACT width of RIGHT screen */
     animation: scroll 80s linear infinite;
 }
 
@@ -237,6 +237,15 @@ ticker.appendChild(el);
     changeArrow.className = `change-arrow ${colorClass}`;
 }
 }
+
+
+const startTime = Date.now();
+const duration = 80000; // 80s
+
+const elapsed = startTime % duration;
+const delay = -(elapsed / 1000);
+
+document.querySelector(".ticker-wrapper").style.animationDelay = delay + "s";
 
 // ---------------- Sorting + Clone Rebuild ----------------
 function sortStocks() {

@@ -239,6 +239,14 @@ ticker.appendChild(el);
 }
 }
 
+
+const startTime = Date.now();
+const duration = 80000; // 80s
+
+const elapsed = startTime % duration;
+const delay = -(elapsed / 1000);
+
+document.querySelector(".ticker-wrapper").style.animationDelay = delay + "s";
 // ---------------- Sorting + Clone Rebuild ----------------
 function sortStocks() {
 
