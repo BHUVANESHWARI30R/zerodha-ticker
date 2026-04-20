@@ -150,13 +150,15 @@ body {
 </div>
 
 <script>
+
 const socket = io();
 const ticker = document.getElementById("ticker");
 const tickerClone = document.getElementById("ticker-clone");
 
 const elements = {};
 const pendingUpdates = {};
-
+let cloneBuilt = false;
+let initialLoadDone = false;
 // ✅ Connection Debug
 socket.on("connect", () => {
     console.log("✅ Connected to backend");
@@ -204,7 +206,10 @@ function addOrUpdateStock(symbol, ltp, change, changePercent) {
 ticker.appendChild(el);
         elements[symbol] = el;
 
+        if (!initialLoadDone && Object.keys(elements).length > 10) {
         sortStocks();
+        initialLoadDone = true;
+        }
 
     } else {
 
@@ -250,13 +255,17 @@ function sortStocks() {
     ticker.innerHTML = "";
     items.forEach(item => ticker.appendChild(item));
 
-    // ✅ Rebuild clone WITHOUT duplicate IDs
-    tickerClone.innerHTML = "";
+    // ✅ Only build clone ONCE
+    if (!cloneBuilt) {
+        tickerClone.innerHTML = "";
 
-    items.forEach(item => {
-        const clone = item.cloneNode(true);
-        tickerClone.appendChild(clone);
-    });
+        items.forEach(item => {
+            const clone = item.cloneNode(true);
+            tickerClone.appendChild(clone);
+        });
+
+        cloneBuilt = true;
+    }
 }
 
 // ---------------- Batch Updates (Smooth UI) ----------------
