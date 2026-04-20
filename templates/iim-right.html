@@ -149,7 +149,7 @@ body {
 </div>
 
 <script>
-
+const socket = io();
 let serverOffset = 0;
 
 socket.on("sync_time", (data) => {
@@ -162,7 +162,7 @@ socket.on("sync_time", (data) => {
 function getSyncedTime() {
     return Date.now() + serverOffset;
 }
-const socket = io();
+
 const ticker = document.getElementById("ticker");
 const tickerClone = document.getElementById("ticker-clone");
 
