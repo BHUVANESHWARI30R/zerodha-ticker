@@ -159,7 +159,7 @@ const tickerClone = document.getElementById("ticker-clone");
 const elements = {};
 const pendingUpdates = {};
 
-
+const wrapper = document.querySelector(".ticker-wrapper");
 
 // ✅ Connection Debug
 socket.on("connect", () => {
@@ -256,13 +256,15 @@ function sortStocks() {
     ticker.innerHTML = "";
     items.forEach(item => ticker.appendChild(item));
 
-    // ✅ Rebuild clone WITHOUT duplicate IDs
     tickerClone.innerHTML = "";
 
-    items.forEach(item => {
-        const clone = item.cloneNode(true);
-        tickerClone.appendChild(clone);
-    });
+    // repeat content multiple times
+    for (let i = 0; i < 3; i++) {
+        items.forEach(item => {
+            const clone = item.cloneNode(true);
+            tickerClone.appendChild(clone);
+        });
+    }
 }
 
 // ---------------- Batch Updates (Smooth UI) ----------------
@@ -281,13 +283,7 @@ socket.on("stock_update", data => {
 });
 
 // ---------------- Smooth JS-based ticker (SYNCED) ----------------
-const SPEED = 120;
-const RIGHT_WIDTH = 2048;
-
-const isLeftScreen = false; // LEFT = true, RIGHT = false
-
-const wrapper = document.querySelector(".ticker-wrapper");
-const baseOffset = isLeftScreen ? -RIGHT_WIDTH : 0;
+const SPEED = 180;
 
 let lastTime = performance.now();
 let position = 0;
@@ -302,24 +298,31 @@ function animate(now) {
 
     position += SPEED * delta;
 
-    const totalWidth = wrapper.scrollWidth / 2;
+    const totalWidth = ticker.scrollWidth;
 
-    if (totalWidth === 0) {
+    if (!totalWidth || totalWidth < 50) {
         requestAnimationFrame(animate);
         return;
     }
 
-    const x = baseOffset - (position % totalWidth);
+    const x = -(position % totalWidth);
 
     wrapper.style.transform = `translate3d(${x}px,0,0)`;
 
     requestAnimationFrame(animate);
 }
 
-// delay start for stability
-setTimeout(() => {
-    requestAnimationFrame(animate);
-}, 200);
+// wait until content exists
+function waitForContent() {
+    if (wrapper.scrollWidth > 100) {
+        requestAnimationFrame(animate);
+    } else {
+        setTimeout(waitForContent, 100);
+    }
+}
+
+waitForContent();
+
 
 
 </script>

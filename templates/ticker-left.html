@@ -253,18 +253,18 @@ function sortStocks() {
         a.dataset.symbol.localeCompare(b.dataset.symbol)
     );
 
-    ticker.innerHTML = "";
-    items.forEach(item => ticker.appendChild(item));
+            ticker.innerHTML = "";
+            items.forEach(item => ticker.appendChild(item));
 
-    tickerClone.innerHTML = "";
+            tickerClone.innerHTML = "";
 
-// repeat content multiple times
-for (let i = 0; i < 3; i++) {
-    items.forEach(item => {
-        const clone = item.cloneNode(true);
-        tickerClone.appendChild(clone);
-    });
-}
+        // repeat content multiple times
+        for (let i = 0; i < 3; i++) {
+            items.forEach(item => {
+                const clone = item.cloneNode(true);
+                tickerClone.appendChild(clone);
+            });
+        }
 }
 
 // ---------------- Batch Updates (Smooth UI) ----------------
