@@ -137,6 +137,15 @@ def iimranchi():
         return redirect(kite.login_url())
     return render_template("iim-ranchi.html")
 
+
+@app.route("/iim-ranchi-ticker")
+def iimranchi():
+    access_token = load_access_token()
+    if not access_token:
+        # Redirect user to Zerodha login page automatically
+        return redirect(kite.login_url())
+    return render_template("iim-ranchi-ticker.html")
+
 @app.route("/iim-left")
 def iim_left():
     return render_template("iim-left.html")
