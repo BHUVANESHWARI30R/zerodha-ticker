@@ -250,6 +250,16 @@ ticker.appendChild(el);
 }
 }
 
+
+function applySync() {
+    const duration = 50000;
+
+    const now = getSyncedTime();
+    const offset = now % duration;
+
+    document.querySelector(".ticker-wrapper").style.animationDelay =
+        `-${offset}ms`;
+}
 // ---------------- Sorting + Clone Rebuild ----------------
 function sortStocks() {
 
