@@ -149,6 +149,19 @@ body {
 </div>
 
 <script>
+
+let serverOffset = 0;
+
+socket.on("sync_time", (data) => {
+    const clientNow = Date.now();
+    serverOffset = data.server_time - clientNow;
+
+    applySync(); // start sync after receiving time
+});
+
+function getSyncedTime() {
+    return Date.now() + serverOffset;
+}
 const socket = io();
 const ticker = document.getElementById("ticker");
 const tickerClone = document.getElementById("ticker-clone");

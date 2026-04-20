@@ -165,9 +165,15 @@ def callback():
 def send_cached_data():
     print("🌐 Browser connected. Sending cached stock data...")
 
+    # ✅ SEND SERVER TIME (VERY IMPORTANT)
+    socketio.emit("sync_time", {
+        "server_time": datetime.now().timestamp() * 1000
+    })
+
+    # send existing stock data
     for data in LATEST_DATA.values():
         socketio.emit("stock_update", data)
-    
+
 # ---------------- Kite WebSocket ----------------
 def on_connect(ws, response):
     print("✅ Zerodha WebSocket Connected")
