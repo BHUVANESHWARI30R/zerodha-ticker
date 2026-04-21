@@ -172,7 +172,7 @@ function formatSignedNumber(value) {
 
 function makeStockHTML(data) {
     const colorClass = data.change < 0 ? "down" : "up";
-    const arrow = data.change >= 0 ? "▲" : "▼';
+    const arrow = data.change >= 0 ? "▲" : "▼";
 
     return `
         <div class="stock" data-symbol="${data.symbol}">
