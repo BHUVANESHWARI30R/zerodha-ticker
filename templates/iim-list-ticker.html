@@ -2,38 +2,45 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>DigiWave Smooth Pro Ticker</title>
+<title>DigiWave Stock Ticker</title>
 
 <link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 
 <style>
-html, body {
+body {
     margin: 0;
-    padding: 0;
     background: #000;
     font-family: 'Teko', sans-serif;
     overflow: hidden;
 }
 
-/* SCREENS */
-.ticker-row {
-    overflow: hidden;
-    position: relative;
+.page {
+    width: 100%;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
 }
 
-.left {
+.ticker-row {
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    background: #000;
+}
+
+.list1-row {
     width: 2176px;
     height: 120px;
 }
 
-.right {
+.list2-row {
     width: 2048px;
     height: 120px;
 }
 
-/* MOVING LAYER */
-.wrapper {
+.ticker-wrapper {
     display: flex;
     width: max-content;
     will-change: transform;
@@ -41,14 +48,12 @@ html, body {
     backface-visibility: hidden;
 }
 
-/* CONTENT */
 .ticker {
     display: flex;
     align-items: center;
     white-space: nowrap;
 }
 
-/* STOCK BLOCK */
 .stock {
     display: flex;
     align-items: center;
@@ -61,16 +66,17 @@ html, body {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    width: 100%;
     gap: 28px;
 }
 
 .symbol-ltp {
-    font-size: 55px;
     font-weight: bold;
-    line-height: 1.1;
+    font-size: 55px;
+    line-height: 1.10;
 }
 
-.change {
+.change-arrow {
     font-size: 55px;
     font-weight: bold;
 }
@@ -82,24 +88,31 @@ html, body {
 
 <body>
 
-<!-- LEFT SCREEN -->
-<div class="ticker-row left">
-    <div class="wrapper" id="wrapper1">
-        <div class="ticker" id="ticker1"></div>
-        <div class="ticker" id="ticker1-clone"></div>
-    </div>
-</div>
+<div class="page">
 
-<!-- RIGHT SCREEN -->
-<div class="ticker-row right">
-    <div class="wrapper" id="wrapper2">
-        <div class="ticker" id="ticker2"></div>
-        <div class="ticker" id="ticker2-clone"></div>
+    <!-- LEFT SCREEN -->
+    <div class="ticker-row list1-row">
+        <div class="ticker-wrapper" id="wrapper1">
+            <div class="ticker" id="ticker1"></div>
+            <div class="ticker" id="ticker1-clone"></div>
+        </div>
     </div>
+
+    <!-- RIGHT SCREEN -->
+    <div class="ticker-row list2-row">
+        <div class="ticker-wrapper" id="wrapper2">
+            <div class="ticker" id="ticker2"></div>
+            <div class="ticker" id="ticker2-clone"></div>
+        </div>
+    </div>
+
 </div>
 
 <script>
 const socket = io();
+
+const wrapper1 = document.getElementById("wrapper1");
+const wrapper2 = document.getElementById("wrapper2");
 
 const ticker1 = document.getElementById("ticker1");
 const ticker1Clone = document.getElementById("ticker1-clone");
@@ -107,10 +120,7 @@ const ticker1Clone = document.getElementById("ticker1-clone");
 const ticker2 = document.getElementById("ticker2");
 const ticker2Clone = document.getElementById("ticker2-clone");
 
-const wrapper1 = document.getElementById("wrapper1");
-const wrapper2 = document.getElementById("wrapper2");
-
-const LEFT_WIDTH = 2176;
+const LEFT_SCREEN_WIDTH = 2176;
 
 let displayQueue = [];
 let pendingUpdates = {};
@@ -118,7 +128,7 @@ let pendingUpdates = {};
 let globalX = 0;
 let cycleWidth = 0;
 
-const SPEED = 2.2; // 🔧 adjust here
+const SPEED = 2.2;
 
 /* ---------------- socket ---------------- */
 socket.on("connect", () => {
@@ -130,23 +140,23 @@ socket.on("stock_update", (data) => {
 });
 
 /* ---------------- helpers ---------------- */
-function formatSigned(value) {
+function formatSignedNumber(value) {
     return value >= 0 ? `+${value}` : value;
 }
 
-function makeHTML(d) {
-    const cls = d.change >= 0 ? "up" : "down";
-    const arrow = d.change >= 0 ? "▲" : "▼";
+function makeStockHTML(data) {
+    const colorClass = data.change < 0 ? "down" : "up";
+    const arrow = data.change >= 0 ? "▲" : "▼";
 
     return `
         <div class="stock">
             <div class="stock-text">
-                <div class="symbol-ltp ${cls}">
-                    ${d.symbol} ${d.ltp}
+                <div class="symbol-ltp ${colorClass}">
+                    ${data.symbol} ${data.ltp}
                 </div>
 
-                <div class="change ${cls}">
-                    ${arrow} ${formatSigned(d.change)}
+                <div class="change-arrow ${colorClass}">
+                    ${arrow} ${formatSignedNumber(data.change)}
                 </div>
             </div>
         </div>
@@ -154,10 +164,10 @@ function makeHTML(d) {
 }
 
 /* ---------------- render ---------------- */
-function render() {
-    if (!displayQueue.length) return;
+function renderSharedStream() {
+    if (displayQueue.length === 0) return;
 
-    const html = displayQueue.map(makeHTML).join("");
+    const html = displayQueue.map(makeStockHTML).join("");
 
     ticker1.innerHTML = html;
     ticker1Clone.innerHTML = html;
@@ -185,33 +195,32 @@ function animate(now) {
         globalX -= cycleWidth;
     }
 
-    const leftOffset = globalX % cycleWidth;
-    const rightOffset = (globalX + LEFT_WIDTH) % cycleWidth;
+    const offsetLeft = globalX % cycleWidth;
+    const offsetRight = (globalX + LEFT_SCREEN_WIDTH) % cycleWidth;
 
-    wrapper1.style.transform = `translate3d(${-leftOffset}px,0,0)`;
-    wrapper2.style.transform = `translate3d(${-rightOffset}px,0,0)`;
+    wrapper1.style.transform = `translate3d(${-offsetLeft}px,0,0)`;
+    wrapper2.style.transform = `translate3d(${-offsetRight}px,0,0)`;
 }
 
-/* ---------------- update queue (no flicker) ---------------- */
+/* ---------------- update queue ---------------- */
 setInterval(() => {
-    const keys = Object.keys(pendingUpdates);
-    if (!keys.length) return;
+    const symbols = Object.keys(pendingUpdates);
+    if (!symbols.length) return;
 
-    for (const k of keys) {
-        const existing = displayQueue.find(x => x.symbol === k);
+    for (const symbol of symbols) {
+        const existing = displayQueue.find(x => x.symbol === symbol);
 
         if (existing) {
-            Object.assign(existing, pendingUpdates[k]);
+            Object.assign(existing, pendingUpdates[symbol]);
         } else {
-            displayQueue.push(pendingUpdates[k]);
+            displayQueue.push(pendingUpdates[symbol]);
         }
 
-        delete pendingUpdates[k];
+        delete pendingUpdates[symbol];
     }
 
-    render();
+    renderSharedStream();
 }, 300);
-
 
 animate();
 </script>
