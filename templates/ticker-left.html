@@ -2,11 +2,9 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>DigiWave Stock Ticker</title>
+<title>DigiWave Stock Ticker - LEFT</title>
 
 <link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;600;700&display=swap" rel="stylesheet">
-
-<!-- ✅ Socket.IO v4 (compatible with Flask-SocketIO 5+) -->
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 
 <style>
@@ -18,7 +16,7 @@ body {
 }
 
 .ticker-container {
-    width: 100%;
+    width: 2176px;
     height: 120px;
     overflow: hidden;
     display: flex;
@@ -29,15 +27,9 @@ body {
 
 .ticker-wrapper {
     width: max-content;
-display: flex;
+    display: flex;
     will-change: transform;
     transform: translate3d(0,0,0);
-    backface-visibility: hidden;
-}
-
-@keyframes scroll {
-    0% { transform: translateX(var(--start-offset, 0px)); }
-    100% { transform: translateX(calc(var(--start-offset, 0px) - 50%)); }
 }
 
 .ticker {
@@ -51,36 +43,13 @@ display: flex;
     align-items: center;
     justify-content: space-between;
     margin-right: 80px;
-    min-width: 260px;   /* ✅ INCREASE WIDTH */
-}
-.symbol {
-    font-size: 55px;
-    font-weight: bold;
-    white-space: nowrap;   /* ✅ PREVENT CUT */
-}
-.left-side {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-}
-
-.right-side {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 1px;
-}
-
-.stock-text {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    width: 100%;
+    min-width: 260px;
 }
 
 .symbol-ltp {
     font-weight: bold;
     font-size: 55px;
+    line-height: 1.10;
 }
 
 .change-arrow {
@@ -88,56 +57,11 @@ display: flex;
     font-weight: bold;
     display: flex;
     align-items: center;
-}
-
-.arrow {
-    margin-right: 2px;
+    line-height: 1.10;
 }
 
 .up { color: lime; }
 .down { color: red; }
-.left-side {
-    display: flex;
-    flex-direction: column;
-}
-
-.right-side {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-}
-
-.symbol {
-    font-size: 55px;
-    font-weight: bold;
-}
-
-.price {
-    font-size: 50px;
-}
-
-.percent {
-    font-size: 40px;
-}
-
-.change {
-    font-size: 45px;
-    display: flex;
-    align-items: center;
-}
-.symbol-ltp {
-    font-weight: bold;
-    font-size: 55px;
-    line-height: 1.10;   /* 🔥 reduces gap */
-}
-
-.change-arrow {
-    font-size: 55px;
-    font-weight: bold;
-    display: flex;
-    align-items: center;
-    line-height: 1.10;   /* 🔥 reduces gap */
-}
 </style>
 </head>
 
@@ -152,23 +76,54 @@ display: flex;
 
 <script>
 const socket = io();
+
 const ticker = document.getElementById("ticker");
 const tickerClone = document.getElementById("ticker-clone");
+const wrapper = document.querySelector(".ticker-wrapper");
 
 const elements = {};
 const pendingUpdates = {};
 
-const wrapper = document.querySelector(".ticker-wrapper");
+// =====================
+// 🔥 SYNC CLOCK (FIXED)
+// =====================
+let serverTime = 0;
+let clientSyncTime = performance.now();
 
-// ✅ Connection Debug
-socket.on("connect", () => {
-    console.log("✅ Connected to backend");
+socket.on("ticker_sync", (data) => {
+    serverTime = data.offset;   // server time in seconds
+    clientSyncTime = performance.now();
 });
 
-// ✅ RUN SORT ONLY ONCE LOOP
-setInterval(sortStocks, 5000);
+function getSyncedTime() {
+    return serverTime + (performance.now() - clientSyncTime) / 1000;
+}
 
-// ---------------- Create or Update Stock ----------------
+// =====================
+// SOCKET CONNECT
+// =====================
+socket.on("connect", () => {
+    console.log("✅ LEFT connected");
+});
+
+// =====================
+// STOCK UPDATE BUFFER
+// =====================
+socket.on("stock_update", data => {
+    pendingUpdates[data.symbol] = data;
+});
+
+setInterval(() => {
+    for (const symbol in pendingUpdates) {
+        const d = pendingUpdates[symbol];
+        addOrUpdateStock(symbol, d.ltp, d.change, d.change_percent);
+    }
+    Object.keys(pendingUpdates).forEach(k => delete pendingUpdates[k]);
+}, 500);
+
+// =====================
+// CREATE / UPDATE STOCK
+// =====================
 function addOrUpdateStock(symbol, ltp, change, changePercent) {
 
     const colorClass = change < 0 ? 'down' : 'up';
@@ -180,26 +135,16 @@ function addOrUpdateStock(symbol, ltp, change, changePercent) {
         el.dataset.symbol = symbol;
 
         el.innerHTML = `
-            <div class="stock-text">
-                <div>
-                    <div class="symbol-ltp ${colorClass}">
-                        ${symbol}
-                    </div>
-                    <div class="symbol-ltp ${colorClass}">
-                        ${ltp}
-                    </div>
-                </div>
+            <div>
+                <div class="symbol-ltp ${colorClass}">${symbol}</div>
+                <div class="symbol-ltp ${colorClass}">${ltp}</div>
+            </div>
 
-                <div class="change-arrow ${colorClass}" style="flex-direction: column; align-items: flex-end;">
-                    <div>(${changePercent}%)</div>
-                    <div>
-                        <span class="arrow">
-                            ${change >= 0 ? '▲' : '▼'}
-                        </span>
-                        <span>
-                            ${change >= 0 ? '+' + change : change}
-                        </span>
-                    </div>
+            <div class="change-arrow ${colorClass}" style="flex-direction: column; align-items: flex-end;">
+                <div>(${changePercent}%)</div>
+                <div>
+                    <span>${change >= 0 ? '▲' : '▼'}</span>
+                    <span>${change >= 0 ? '+' + change : change}</span>
                 </div>
             </div>
         `;
@@ -211,30 +156,26 @@ function addOrUpdateStock(symbol, ltp, change, changePercent) {
 
         const el = elements[symbol];
 
-        const symbolBlocks = el.querySelectorAll(".symbol-ltp");
-        const priceBlock = symbolBlocks[1];
-
+        const priceBlock = el.querySelectorAll(".symbol-ltp")[1];
         const changeArrow = el.querySelector(".change-arrow");
 
-        const percentDiv = changeArrow.children[0];
-        const changeRow = changeArrow.children[1];
-
-        const arrow = changeRow.querySelector(".arrow");
-        const changeSpan = changeRow.querySelector("span:last-child");
-
         priceBlock.textContent = ltp;
-        percentDiv.textContent = `(${changePercent}%)`;
-        arrow.textContent = change >= 0 ? '▲' : '▼';
-        changeSpan.textContent = change >= 0 ? '+' + change : change;
+        changeArrow.children[0].textContent = `(${changePercent}%)`;
 
-        symbolBlocks[0].className = `symbol-ltp ${colorClass}`;
-        symbolBlocks[1].className = `symbol-ltp ${colorClass}`;
+        const row = changeArrow.children[1];
+        row.children[0].textContent = change >= 0 ? '▲' : '▼';
+        row.children[1].textContent = change >= 0 ? '+' + change : change;
+
+        el.querySelectorAll(".symbol-ltp")[0].className = `symbol-ltp ${colorClass}`;
+        priceBlock.className = `symbol-ltp ${colorClass}`;
         changeArrow.className = `change-arrow ${colorClass}`;
     }
 }
 
-// ---------------- Sorting + Clone ----------------
-function sortStocks() {
+// =====================
+// SORT + CLONE
+// =====================
+setInterval(() => {
 
     const items = Array.from(ticker.children);
 
@@ -243,64 +184,35 @@ function sortStocks() {
     );
 
     ticker.innerHTML = "";
-    items.forEach(item => ticker.appendChild(item));
+    items.forEach(i => ticker.appendChild(i));
 
     tickerClone.innerHTML = "";
-    items.forEach(item => {
-        tickerClone.appendChild(item.cloneNode(true));
-    });
-}
+    items.forEach(i => tickerClone.appendChild(i.cloneNode(true)));
 
-// ---------------- Batch Updates ----------------
-setInterval(() => {
-    for (const symbol in pendingUpdates) {
-        const d = pendingUpdates[symbol];
-        addOrUpdateStock(symbol, d.ltp, d.change, d.change_percent);
-    }
-    Object.keys(pendingUpdates).forEach(k => delete pendingUpdates[k]);
-}, 1000);
+}, 5000);
 
-// ---------------- Socket Listener ----------------
-socket.on("stock_update", data => {
-    pendingUpdates[data.symbol] = data;
-});
-
-// ---------------- PERFECT SYNC ANIMATION ----------------
-
+// =====================
+// 🔥 PERFECT SYNC ANIMATION
+// =====================
 const SPEED = 160;
-
-// 🔥 GLOBAL TIME BASED POSITION (NO DRIFT)
-function getPosition() {
-    return Date.now() / 1000 * SPEED;
-}
 
 function animate() {
 
     const totalWidth = ticker.scrollWidth;
-
     if (!totalWidth) {
         requestAnimationFrame(animate);
         return;
     }
 
-    const position = getPosition();
-    const x = -(position % totalWidth);
+    const t = getSyncedTime();
+    const x = -(t * SPEED % totalWidth);
 
     wrapper.style.transform = `translate3d(${x}px,0,0)`;
 
     requestAnimationFrame(animate);
 }
 
-// wait until content exists
-function waitForContent() {
-    if (wrapper.scrollWidth > 100) {
-        requestAnimationFrame(animate);
-    } else {
-        setTimeout(waitForContent, 100);
-    }
-}
-
-waitForContent();
+requestAnimationFrame(animate);
 
 </script>
 

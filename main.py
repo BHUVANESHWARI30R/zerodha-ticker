@@ -181,27 +181,36 @@ def callback():
 
 import time
 
-def send_time_sync():
+START_TIME = time.time()
+SYNC_LOCK = False
+
+def ticker_sync_loop():
+    global SYNC_LOCK
+
+    if SYNC_LOCK:
+        return
+
+    SYNC_LOCK = True
+    print("⏱️ Ticker sync loop started")
+
     while True:
-        socketio.emit("sync_time", {
-            "server_time": int(time.time() * 1000)
-        })
-        socketio.sleep(2)  # send every 5 seconds
+        elapsed = time.time() - START_TIME
+
+        socketio.emit("ticker_sync", {
+            "offset": elapsed
+        }, broadcast=True)
+
+        socketio.sleep(0.03)
 
 # ---------------- Send Cached Data on Browser Connect ----------------
-import time
-
 @socketio.on("connect")
-def send_cached_data():
-    print("🌐 Browser connected. Sending cached stock data...")
+def on_connect():
+    print("🌐 Client connected")
 
-    # ✅ SAME TIME SOURCE AS SYNC LOOP
-    socketio.emit("sync_time", {
-        "server_time": int(time.time() * 1000)
+    # force sync immediately
+    socketio.emit("ticker_sync", {
+        "offset": time.time() - START_TIME
     })
-    # send existing stock data
-    for data in LATEST_DATA.values():
-        socketio.emit("stock_update", data)
 
 # ---------------- Kite WebSocket ----------------
 def on_connect(ws, response):
@@ -320,7 +329,8 @@ def start_kite_ws():
         ws_running = False
 
 if __name__ == "__main__":
-    socketio.start_background_task(send_time_sync)
+    socketio.start_background_task(ticker_sync_loop)
+   
     print("🌐 Starting Flask App on http://127.0.0.1:80")
 
     access_token = load_access_token()
@@ -328,4 +338,4 @@ if __name__ == "__main__":
     if access_token:
         threading.Thread(target=start_kite_ws, daemon=True).start()
 
-    socketio.run(app, host="0.0.0.0", port=80, debug=True)
+    socketio.run(app, host="0.0.0.0", port=80, debug=False,use_reloader=False )
