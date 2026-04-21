@@ -54,7 +54,7 @@ body {
 
 .ticker-wrapper {
     display: flex;
-    width: 100%;
+    width: max-content;
     will-change: transform;
     transform: translate3d(0, 0, 0);
     backface-visibility: hidden;
@@ -66,7 +66,7 @@ body {
     display: flex;
     align-items: center;
     white-space: nowrap;
-    width: 100%;
+    width: max-content;
     flex-shrink: 0;
     margin: 0;
     padding: 0;
@@ -110,69 +110,87 @@ body {
 
 .up { color: lime; }
 .down { color: red; }
-
-#measureBox {
-    position: absolute;
-    visibility: hidden;
-    left: -99999px;
-    top: -99999px;
-    white-space: nowrap;
-    pointer-events: none;
-    margin: 0;
-    padding: 0;
-}
 </style>
 </head>
 
 <body>
 
 <div class="page">
-    <div class="ticker-row list1-row">
-        <div class="ticker-wrapper">
+    <div class="ticker-row list1-row" id="row1">
+        <div class="ticker-wrapper" id="wrapper1">
             <div class="ticker" id="ticker1"></div>
+            <div class="ticker" id="ticker1-clone"></div>
         </div>
     </div>
 
-    <div class="ticker-row list2-row">
-        <div class="ticker-wrapper">
+    <div class="ticker-row list2-row" id="row2">
+        <div class="ticker-wrapper" id="wrapper2">
             <div class="ticker" id="ticker2"></div>
+            <div class="ticker" id="ticker2-clone"></div>
         </div>
     </div>
 </div>
 
-<div id="measureBox"></div>
-
 <script>
-console.log("SMOOTH FIX APPLIED");
+console.log("SYNCED SMOOTH TICKER LOADED");
 
 const socket = io();
 
-const wrapper1 = document.querySelector(".list1-row .ticker-wrapper");
-const wrapper2 = document.querySelector(".list2-row .ticker-wrapper");
+const wrapper1 = document.getElementById("wrapper1");
+const wrapper2 = document.getElementById("wrapper2");
 
 const ticker1 = document.getElementById("ticker1");
-const ticker2 = document.getElementById("ticker2");
+const ticker1Clone = document.getElementById("ticker1-clone");
 
+const ticker2 = document.getElementById("ticker2");
+const ticker2Clone = document.getElementById("ticker2-clone");
+
+const row1 = document.getElementById("row1");
+const row2 = document.getElementById("row2");
+
+/* ---------------- URL MODE ----------------
+   ?screen=1  -> only row1
+   ?screen=2  -> only row2
+   no param   -> both rows (browser preview)
+*/
+const params = new URLSearchParams(window.location.search);
+const screenMode = params.get("screen") || "both";
+
+if (screenMode === "1") {
+    row2.style.display = "none";
+}
+if (screenMode === "2") {
+    row1.style.display = "none";
+}
+
+/* ---------------- CONSTANTS ---------------- */
 const LEFT_SCREEN_WIDTH = 2176;
+const SPEED = 0.02;              // smooth synced speed
+const START_TIME = 1700000000000; // fixed absolute reference
+const UPDATE_INTERVAL_MS = 300;
 
 /* ---------------- DATA ---------------- */
 let displayQueue = [];
-let pendingUpdates = {};
-let queue3State = new Map();
-
-/* ---------------- SMOOTH ENGINE ---------------- */
+const pendingUpdates = {};
+const queue3State = new Map();
 let cycleWidth = 0;
-const SPEED = 0.02; // 🔥 smooth LED speed
-const START_TIME = 1700000000000;
 
 /* ---------------- SOCKET ---------------- */
+socket.on("connect", () => {
+    console.log("✅ Connected to backend");
+});
+
+socket.on("connect_error", (err) => {
+    console.error("❌ connect_error:", err);
+});
+
 socket.on("stock_update", (data) => {
     pendingUpdates[data.symbol] = data;
 });
 
 /* ---------------- UI ---------------- */
 function formatSignedNumber(value) {
-    return value >= 0 ? `+${value}` : value;
+    return value >= 0 ? `+${value}` : `${value}`;
 }
 
 function makeStockHTML(data) {
@@ -180,7 +198,7 @@ function makeStockHTML(data) {
     const arrow = data.change >= 0 ? "▲" : "▼";
 
     return `
-        <div class="stock">
+        <div class="stock" data-symbol="${data.symbol}">
             <div class="stock-text">
                 <div>
                     <div class="symbol-ltp ${colorClass}">${data.symbol}</div>
@@ -201,32 +219,46 @@ function makeStockHTML(data) {
 
 /* ---------------- RENDER ---------------- */
 function renderTicker() {
-    if (!displayQueue.length) return;
+    if (!displayQueue.length) {
+        ticker1.innerHTML = "";
+        ticker1Clone.innerHTML = "";
+        ticker2.innerHTML = "";
+        ticker2Clone.innerHTML = "";
+        cycleWidth = 0;
+        return;
+    }
 
     const html = displayQueue.map(makeStockHTML).join("");
 
-    // duplicate for seamless loop
-    ticker1.innerHTML = html + html;
-    ticker2.innerHTML = html + html;
+    // duplicate once for seamless loop
+    ticker1.innerHTML = html;
+    ticker1Clone.innerHTML = html;
 
-    cycleWidth = ticker1.scrollWidth / 2;
+    ticker2.innerHTML = html;
+    ticker2Clone.innerHTML = html;
+
+    cycleWidth = ticker1.scrollWidth;
 }
 
-/* ---------------- PERFECT SMOOTH SCROLL ---------------- */
+/* ---------------- ABSOLUTE-TIME SYNC ---------------- */
 function animate() {
     requestAnimationFrame(animate);
 
     if (!cycleWidth) return;
 
     const now = Date.now() - START_TIME;
-
     const x = (now * SPEED) % cycleWidth;
 
     const leftOffset = x;
     const rightOffset = x + LEFT_SCREEN_WIDTH;
 
-    wrapper1.style.transform = `translate3d(${-leftOffset}px,0,0)`;
-    wrapper2.style.transform = `translate3d(${-rightOffset}px,0,0)`;
+    if (screenMode !== "2") {
+        wrapper1.style.transform = `translate3d(${-leftOffset}px,0,0)`;
+    }
+
+    if (screenMode !== "1") {
+        wrapper2.style.transform = `translate3d(${-rightOffset}px,0,0)`;
+    }
 }
 
 /* ---------------- UPDATE QUEUE ---------------- */
@@ -238,45 +270,29 @@ setInterval(() => {
 
     for (const symbol of symbols) {
         const data = pendingUpdates[symbol];
-
         queue3State.set(symbol, {
             ...data,
             ts: now
         });
-
         delete pendingUpdates[symbol];
     }
 
     const nextQueue = [];
-
     for (const [, data] of queue3State) {
         nextQueue.push(data);
     }
 
     nextQueue.sort((a, b) => a.symbol.localeCompare(b.symbol));
-
     displayQueue = nextQueue;
 
-    renderTicker(); // 🔥 only render when data changes
-
-}, 300);
-
-/* ---------------- TEST DATA ---------------- */
-setTimeout(() => {
-    displayQueue = [
-        {symbol:"RELIANCE", ltp:2890, change:10, change_percent:0.4},
-        {symbol:"TCS", ltp:3980, change:-5, change_percent:-0.2},
-        {symbol:"INFY", ltp:1520, change:4, change_percent:0.3},
-        {symbol:"HDFCBANK", ltp:1647, change:6, change_percent:0.2},
-        {symbol:"SBIN", ltp:820, change:3, change_percent:0.1},
-        {symbol:"ITC", ltp:450, change:-2, change_percent:-0.4},
-        {symbol:"LT", ltp:3650, change:8, change_percent:0.5}
-    ];
     renderTicker();
-}, 500);
+}, UPDATE_INTERVAL_MS);
+
 
 /* ---------------- START ---------------- */
+renderTicker();
 animate();
 </script>
+
 </body>
 </html>
