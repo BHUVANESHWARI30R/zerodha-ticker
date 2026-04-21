@@ -137,30 +137,37 @@ def iimranchi():
         return redirect(kite.login_url())
     return render_template("iim-ranchi.html")
 
-
-@app.route("/iim-ranchi-ticker")
-def iimranchiticker():
+@app.route("/iim-list-ticker")
+def iimlistticker():
     access_token = load_access_token()
     if not access_token:
         # Redirect user to Zerodha login page automatically
         return redirect(kite.login_url())
-    return render_template("iim-ranchi-ticker.html")
+    return render_template("iim-list-ticker.html")
 
-@app.route("/ticker-left")
-def tickerleft():
-    access_token = load_access_token()
-    if not access_token:
-        # Redirect user to Zerodha login page automatically
-        return redirect(kite.login_url())
-    return render_template("ticker-left.html")
+# @app.route("/iim-ranchi-ticker")
+# def iimranchiticker():
+#     access_token = load_access_token()
+#     if not access_token:
+#         # Redirect user to Zerodha login page automatically
+#         return redirect(kite.login_url())
+#     return render_template("iim-ranchi-ticker.html")
 
-@app.route("/ticker-right")
-def tickerright():
-    access_token = load_access_token()
-    if not access_token:
-        # Redirect user to Zerodha login page automatically
-        return redirect(kite.login_url())
-    return render_template("ticker-right.html")
+# @app.route("/ticker-left")
+# def tickerleft():
+#     access_token = load_access_token()
+#     if not access_token:
+#         # Redirect user to Zerodha login page automatically
+#         return redirect(kite.login_url())
+#     return render_template("ticker-left.html")
+
+# @app.route("/ticker-right")
+# def tickerright():
+#     access_token = load_access_token()
+#     if not access_token:
+#         # Redirect user to Zerodha login page automatically
+#         return redirect(kite.login_url())
+#     return render_template("ticker-right.html")
 
 @app.route("/callback")
 def callback():
@@ -181,36 +188,27 @@ def callback():
 
 import time
 
-START_TIME = time.time()
-SYNC_LOCK = False
-
-def ticker_sync_loop():
-    global SYNC_LOCK
-
-    if SYNC_LOCK:
-        return
-
-    SYNC_LOCK = True
-    print("⏱️ Ticker sync loop started")
-
+def send_time_sync():
     while True:
-        elapsed = time.time() - START_TIME
-
-        socketio.emit("ticker_sync", {
-            "offset": elapsed
-        }, broadcast=True)
-
-        socketio.sleep(0.03)
+        socketio.emit("sync_time", {
+            "server_time": int(time.time() * 1000)
+        })
+        socketio.sleep(2)  # send every 5 seconds
 
 # ---------------- Send Cached Data on Browser Connect ----------------
-@socketio.on("connect")
-def on_connect():
-    print("🌐 Client connected")
+import time
 
-    # force sync immediately
-    socketio.emit("ticker_sync", {
-        "offset": time.time() - START_TIME
+@socketio.on("connect")
+def send_cached_data():
+    print("🌐 Browser connected. Sending cached stock data...")
+
+    # ✅ SAME TIME SOURCE AS SYNC LOOP
+    socketio.emit("sync_time", {
+        "server_time": int(time.time() * 1000)
     })
+    # send existing stock data
+    for data in LATEST_DATA.values():
+        socketio.emit("stock_update", data)
 
 # ---------------- Kite WebSocket ----------------
 def on_connect(ws, response):
@@ -329,8 +327,7 @@ def start_kite_ws():
         ws_running = False
 
 if __name__ == "__main__":
-    socketio.start_background_task(ticker_sync_loop)
-   
+    socketio.start_background_task(send_time_sync)
     print("🌐 Starting Flask App on http://127.0.0.1:80")
 
     access_token = load_access_token()
@@ -338,4 +335,4 @@ if __name__ == "__main__":
     if access_token:
         threading.Thread(target=start_kite_ws, daemon=True).start()
 
-    socketio.run(app, host="0.0.0.0", port=80, debug=False,use_reloader=False )
+    socketio.run(app, host="0.0.0.0", port=8080, debug=True)
