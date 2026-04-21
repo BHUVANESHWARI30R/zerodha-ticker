@@ -46,7 +46,7 @@ body {
 
 .ticker-wrapper {
     display: flex;
-    width: max-content;
+    width: 100%;
     will-change: transform;
     transform: translate3d(0, 0, 0);
     backface-visibility: hidden;
@@ -56,6 +56,7 @@ body {
     display: flex;
     align-items: center;
     white-space: nowrap;
+    width: 100%;
     flex-shrink: 0;
 }
 
@@ -102,7 +103,6 @@ body {
     border-top: 1px solid rgba(255,255,255,0.05);
 }
 
-/* hidden measurer */
 #measureBox {
     position: absolute;
     visibility: hidden;
@@ -117,16 +117,14 @@ body {
 <body>
 
 <div class="page">
-    <!-- ROW 1 = LEFT SCREEN -->
     <div class="ticker-row list1-row">
-        <div class="ticker-wrapper" id="wrapper1">
+        <div class="ticker-wrapper">
             <div class="ticker" id="ticker1"></div>
         </div>
     </div>
 
-    <!-- ROW 2 = RIGHT SCREEN -->
     <div class="ticker-row list2-row">
-        <div class="ticker-wrapper" id="wrapper2">
+        <div class="ticker-wrapper">
             <div class="ticker" id="ticker2"></div>
         </div>
     </div>
@@ -139,25 +137,17 @@ console.log("SCRIPT LOADED");
 
 const socket = io();
 
-const ticker1 = document.getElementById("ticker1"); // LEFT
-const ticker2 = document.getElementById("ticker2"); // RIGHT
+const ticker1 = document.getElementById("ticker1");
+const ticker2 = document.getElementById("ticker2");
 const measureBox = document.getElementById("measureBox");
-
-/* =========================================================
-   SCREEN MODEL
-   row1 = LEFT screen
-   row2 = RIGHT screen
-
-   DATA MODEL
-   queue3State = realtime latest stock state
-   queue4      = sorted fresh display-ready queue
-   displayQueue = single ordered stock stream
-========================================================= */
 
 const LEFT_SCREEN_WIDTH = 2176;
 const RIGHT_SCREEN_WIDTH = 2048;
 
-const queue3State = new Map();   // symbol -> latest payload + timestamp
+const ROW1_FIXED_COUNT = 5;
+const ROW2_FIXED_COUNT = 5; // change to 6 if you want more on row 2
+
+const queue3State = new Map();
 let queue4 = [];
 let displayQueue = [];
 
@@ -166,13 +156,9 @@ const pendingUpdates = {};
 const FRESH_MS = 15000;
 const APPLY_UPDATES_MS = 200;
 const BUILD_QUEUE4_MS = 1000;
+const STEP_INTERVAL_MS = 450;
 
-/*
-  STEP MODE:
-  - no stock gets cut at the split
-  - ticker advances one stock at a time
-*/
-const STEP_INTERVAL_MS = 700;
+const BASE_GAP = 80;
 
 let currentHead = 0;
 let isRendering = false;
@@ -188,7 +174,6 @@ const MASTER_SYMBOLS = [
     "TECHM","TITAN","TRENT","ULTRACEMCO","WIPRO"
 ].sort();
 
-/* ---------------- socket events ---------------- */
 socket.on("connect", () => {
     console.log("✅ Connected to backend");
 });
@@ -201,17 +186,16 @@ socket.on("stock_update", (data) => {
     pendingUpdates[data.symbol] = data;
 });
 
-/* ---------------- helpers ---------------- */
 function formatSignedNumber(value) {
     return value >= 0 ? `+${value}` : `${value}`;
 }
 
-function makeStockHTML(data) {
+function makeStockHTML(data, gap = BASE_GAP) {
     const colorClass = data.change < 0 ? "down" : "up";
     const arrow = data.change >= 0 ? "▲" : "▼";
 
     return `
-        <div class="stock" data-symbol="${data.symbol}">
+        <div class="stock" data-symbol="${data.symbol}" style="margin-right:${gap}px;">
             <div class="stock-text">
                 <div>
                     <div class="symbol-ltp ${colorClass}">${data.symbol}</div>
@@ -237,7 +221,6 @@ function isFresh(entry) {
 
 function queuesEqual(a, b) {
     if (a.length !== b.length) return false;
-
     for (let i = 0; i < a.length; i++) {
         if (a[i].symbol !== b[i].symbol) return false;
         if (a[i].ltp !== b[i].ltp) return false;
@@ -247,8 +230,8 @@ function queuesEqual(a, b) {
     return true;
 }
 
-function measureStockWidth(item) {
-    measureBox.innerHTML = makeStockHTML(item);
+function measureStockWidth(item, gap = BASE_GAP) {
+    measureBox.innerHTML = makeStockHTML(item, gap);
     const el = measureBox.firstElementChild;
     if (!el) return 0;
     const style = getComputedStyle(el);
@@ -264,7 +247,6 @@ function normalizeHead() {
     if (currentHead < 0) currentHead += displayQueue.length;
 }
 
-/* ---------------- queue3 realtime state ---------------- */
 function applyPendingUpdatesToQueue3() {
     const symbols = Object.keys(pendingUpdates);
     if (symbols.length === 0) return false;
@@ -274,13 +256,11 @@ function applyPendingUpdatesToQueue3() {
 
     for (const symbol of symbols) {
         const data = pendingUpdates[symbol];
-
         queue3State.set(symbol, {
             ...data,
             ts: now,
             ready: true
         });
-
         delete pendingUpdates[symbol];
         changed = true;
     }
@@ -288,7 +268,6 @@ function applyPendingUpdatesToQueue3() {
     return changed;
 }
 
-/* ---------------- queue4 sorted fresh display queue ---------------- */
 function rebuildQueue4() {
     const nextQueue4 = [];
 
@@ -308,50 +287,40 @@ function rebuildQueue4() {
     return false;
 }
 
-/* ---------------- segmentation ----------------
-   Build row1 and row2 so split always happens BETWEEN stocks
-*/
-function buildSegments() {
-    const leftItems = [];
-    const rightItems = [];
+function getSequentialItems(startIndex, count) {
+    const items = [];
+    if (displayQueue.length === 0) return items;
 
-    if (displayQueue.length === 0) {
-        return { leftItems, rightItems };
+    for (let i = 0; i < count && i < displayQueue.length; i++) {
+        items.push(displayQueue[(startIndex + i) % displayQueue.length]);
     }
-
-    normalizeHead();
-
-    let idx = currentHead;
-    let leftUsed = 0;
-
-    while (leftItems.length < displayQueue.length) {
-        const item = displayQueue[idx % displayQueue.length];
-        const w = measureStockWidth(item);
-
-        if (leftItems.length > 0 && leftUsed + w > LEFT_SCREEN_WIDTH) break;
-
-        leftItems.push(item);
-        leftUsed += w;
-        idx++;
-    }
-
-    let rightUsed = 0;
-
-    while ((rightItems.length + leftItems.length) < displayQueue.length) {
-        const item = displayQueue[idx % displayQueue.length];
-        const w = measureStockWidth(item);
-
-        if (rightItems.length > 0 && rightUsed + w > RIGHT_SCREEN_WIDTH) break;
-
-        rightItems.push(item);
-        rightUsed += w;
-        idx++;
-    }
-
-    return { leftItems, rightItems };
+    return items;
 }
 
-/* ---------------- rendering ---------------- */
+function computeGapForFixedCount(items, rowWidth) {
+    if (items.length === 0) return 0;
+    if (items.length === 1) return 0;
+
+    let contentWidth = 0;
+    for (const item of items) {
+        contentWidth += measureStockWidth(item, 0);
+    }
+
+    const totalGapSpace = Math.max(rowWidth - contentWidth, 0);
+    const gapCount = items.length - 1;
+
+    return Math.max(Math.min(totalGapSpace / gapCount, 160), 20);
+}
+
+function renderRow(container, items, rowWidth) {
+    const gap = computeGapForFixedCount(items, rowWidth);
+
+    container.innerHTML = items.map((item, i) => {
+        const thisGap = i === items.length - 1 ? 0 : gap;
+        return makeStockHTML(item, thisGap);
+    }).join("");
+}
+
 function renderRows() {
     if (isRendering) return;
     isRendering = true;
@@ -363,26 +332,24 @@ function renderRows() {
         return;
     }
 
-    const { leftItems, rightItems } = buildSegments();
+    normalizeHead();
 
-    ticker1.innerHTML = leftItems.map(makeStockHTML).join("");
-    ticker2.innerHTML = rightItems.map(makeStockHTML).join("");
+    const row1Items = getSequentialItems(currentHead, ROW1_FIXED_COUNT);
+    const row2Start = currentHead + row1Items.length;
+    const row2Items = getSequentialItems(row2Start, ROW2_FIXED_COUNT);
+
+    renderRow(ticker1, row1Items, LEFT_SCREEN_WIDTH);
+    renderRow(ticker2, row2Items, RIGHT_SCREEN_WIDTH);
 
     isRendering = false;
 }
 
-/* ---------------- step ticker ----------------
-   Advance one full stock at a time.
-   This guarantees no stock is cut at the split.
-*/
 function stepTicker() {
     if (displayQueue.length === 0) return;
-
     currentHead = (currentHead + 1) % displayQueue.length;
     renderRows();
 }
 
-/* ---------------- schedulers ---------------- */
 setInterval(() => {
     const changed1 = applyPendingUpdatesToQueue3();
     const changed2 = rebuildQueue4();
@@ -403,7 +370,7 @@ setInterval(() => {
     stepTicker();
 }, STEP_INTERVAL_MS);
 
-/* ---------------- optional local test data ----------------
+/* Optional local test data
 setTimeout(() => {
     const sample = [
         {symbol:"ADANIENT", ltp:2450, change:10, change_percent:0.4},
@@ -438,7 +405,6 @@ setTimeout(() => {
 }, 1000);
 */
 
-/* ---------------- start ---------------- */
 renderRows();
 </script>
 
