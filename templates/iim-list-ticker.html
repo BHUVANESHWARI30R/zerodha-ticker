@@ -15,14 +15,16 @@ body {
     overflow: hidden;
 }
 
-/* page layout */
 .page {
     width: 100%;
     background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
     padding-top: 2px;
 }
 
-/* visible ticker rows */
 .ticker-row {
     overflow: hidden;
     display: flex;
@@ -31,23 +33,21 @@ body {
     position: relative;
 }
 
-.ticker-row.list1-row {
+.list1-row {
     width: 2176px;
     height: 120px;
-    margin: 0;
 }
 
-.ticker-row.list2-row {
+.list2-row {
     width: 2048px;
     height: 120px;
-    margin: 0;
 }
 
-/* wrappers */
 .ticker-wrapper {
     display: flex;
     width: max-content;
     will-change: transform;
+    transform: translate3d(0, 0, 0);
 }
 
 .ticker {
@@ -56,7 +56,6 @@ body {
     white-space: nowrap;
 }
 
-/* stock item */
 .stock {
     display: flex;
     align-items: center;
@@ -95,9 +94,8 @@ body {
 .up { color: lime; }
 .down { color: red; }
 
-/* optional subtle row separation */
 .list2-row {
-    border-top: 1px solid rgba(255,255,255,0.04);
+    border-top: 1px solid rgba(255,255,255,0.05);
 }
 </style>
 </head>
@@ -105,7 +103,7 @@ body {
 <body>
 
 <div class="page">
-    <!-- LIST 1 : top visible final feed -->
+    <!-- LIST 1 -->
     <div class="ticker-row list1-row">
         <div class="ticker-wrapper" id="wrapper1">
             <div class="ticker" id="ticker1"></div>
@@ -113,7 +111,7 @@ body {
         </div>
     </div>
 
-    <!-- LIST 2 : second visible final feed -->
+    <!-- LIST 2 -->
     <div class="ticker-row list2-row">
         <div class="ticker-wrapper" id="wrapper2">
             <div class="ticker" id="ticker2"></div>
@@ -123,15 +121,10 @@ body {
 </div>
 
 <script>
-    console.log("SCRIPT LOADED");
+console.log("SCRIPT LOADED");
+
 const socket = io();
 
-socket.on("connect", () => {
-    console.log("✅ Connected to backend");
-});
-
-
-/* ---------------- DOM refs ---------------- */
 const wrapper1 = document.getElementById("wrapper1");
 const wrapper2 = document.getElementById("wrapper2");
 
@@ -141,36 +134,37 @@ const ticker1Clone = document.getElementById("ticker1-clone");
 const ticker2 = document.getElementById("ticker2");
 const ticker2Clone = document.getElementById("ticker2-clone");
 
-/* ---------------- pipeline lists ----------------
-   list1 = top visible final feed
-   list2 = second visible final feed
-   list3 = storage only
+/*
+  list1 = top visible row
+  list2 = second visible row
+  list3 = storage only
 */
 let list1 = [];
 let list2 = [];
 let list3 = [];
 
-/* quick lookup for incoming batched updates */
 const pendingUpdates = {};
 
-/* tuning */
-const MAX_LIST1 = 8;      // visible items in top row
-const MAX_LIST2 = 8;      // visible items in second row
-const UPDATE_FLUSH_MS = 250;
+const MAX_LIST1 = 8;
+const MAX_LIST2 = 8;
 
-/* scrolling speed in px per frame */
-const SPEED1 = 1.1;       // top row speed
-const SPEED2 = 1.1;       // second row speed
+const SPEED1 = 1.3;
+const SPEED2 = 1.3;
 
 let pos1 = 0;
 let pos2 = 0;
 
-/* ---------------- socket debug ---------------- */
+/* ---------------- socket events ---------------- */
 socket.on("connect", () => {
     console.log("✅ Connected to backend");
 });
 
-socket.on("stock_update", data => {
+socket.on("connect_error", (err) => {
+    console.error("❌ connect_error:", err);
+});
+
+socket.on("stock_update", (data) => {
+    console.log("📥 Received:", data);
     pendingUpdates[data.symbol] = data;
 });
 
@@ -212,14 +206,14 @@ function rerenderAll() {
     renderList(list1, ticker1, ticker1Clone);
     renderList(list2, ticker2, ticker2Clone);
 
-    /* reset scroll positions if list content vanished */
     if (list1.length === 0) {
         pos1 = 0;
-        wrapper1.style.transform = `translate3d(0,0,0)`;
+        wrapper1.style.transform = "translate3d(0,0,0)";
     }
+
     if (list2.length === 0) {
         pos2 = 0;
-        wrapper2.style.transform = `translate3d(0,0,0)`;
+        wrapper2.style.transform = "translate3d(0,0,0)";
     }
 }
 
@@ -244,10 +238,14 @@ function existsAnywhere(symbol) {
     );
 }
 
+function insertSorted(list, data) {
+    list.push({ ...data });
+    list.sort((a, b) => a.symbol.localeCompare(b.symbol));
+}
+
 /* ---------------- incoming tick handling ----------------
-   Rule:
-   - update symbol wherever it already exists
-   - if new symbol, add to storage list3
+   update symbol wherever it exists
+   otherwise insert into list3 alphabetically
 */
 function handleIncomingTick(data) {
     const updated =
@@ -256,13 +254,12 @@ function handleIncomingTick(data) {
         updateIfExists(list3, data);
 
     if (!updated && !existsAnywhere(data.symbol)) {
-        list3.push({ ...data });
+        insertSorted(list3, data);
     }
 }
 
-/* ---------------- pipeline movement ----------------
+/* ---------------- movement pipeline ----------------
    list3 -> list2 -> list1 -> back to list3
-   no duplicates because move removes from source
 */
 function moveList3ToList2() {
     if (list2.length >= MAX_LIST2) return;
@@ -284,10 +281,9 @@ function recycleFromList1() {
     if (list1.length === 0) return;
 
     const item = list1.shift();
-    list3.push(item);
+    insertSorted(list3, item);
 }
 
-/* fill visible rows initially */
 function balancePipeline() {
     while (list2.length < MAX_LIST2 && list3.length > 0) {
         moveList3ToList2();
@@ -298,20 +294,18 @@ function balancePipeline() {
     }
 }
 
-/* ---------------- scroll loop ----------------
-   When a full item exits left from list1, recycle it to list3 end.
-   When a full item exits left from list2, move it to list1.
-*/
+/* ---------------- animation loop ---------------- */
 function animate() {
     requestAnimationFrame(animate);
 
-    /* row 1 */
     if (list1.length > 0 && ticker1.children.length > 0) {
         pos1 -= SPEED1;
 
         const first1 = ticker1.children[0];
         if (first1) {
-            const width1 = first1.offsetWidth + 80; // stock width + margin-right
+            const style1 = getComputedStyle(first1);
+            const width1 = first1.offsetWidth + parseFloat(style1.marginRight || 0);
+
             if (-pos1 >= width1) {
                 pos1 += width1;
                 recycleFromList1();
@@ -320,41 +314,30 @@ function animate() {
             }
         }
 
-        const halfWidth1 = ticker1.offsetWidth;
-        if (halfWidth1 > 0 && -pos1 >= halfWidth1) {
-            pos1 = 0;
-        }
-
         wrapper1.style.transform = `translate3d(${pos1}px,0,0)`;
     }
 
-    /* row 2 */
     if (list2.length > 0 && ticker2.children.length > 0) {
         pos2 -= SPEED2;
 
         const first2 = ticker2.children[0];
         if (first2) {
-            const width2 = first2.offsetWidth + 80;
+            const style2 = getComputedStyle(first2);
+            const width2 = first2.offsetWidth + parseFloat(style2.marginRight || 0);
+
             if (-pos2 >= width2) {
                 pos2 += width2;
-
-                /* move head of list2 to list1 */
                 moveList2ToList1();
                 balancePipeline();
                 rerenderAll();
             }
         }
 
-        const halfWidth2 = ticker2.offsetWidth;
-        if (halfWidth2 > 0 && -pos2 >= halfWidth2) {
-            pos2 = 0;
-        }
-
         wrapper2.style.transform = `translate3d(${pos2}px,0,0)`;
     }
 }
 
-/* ---------------- batch flush ---------------- */
+/* ---------------- apply updates ---------------- */
 setInterval(() => {
     const symbols = Object.keys(pendingUpdates);
     if (symbols.length === 0) return;
@@ -366,13 +349,34 @@ setInterval(() => {
 
     balancePipeline();
     rerenderAll();
-}, UPDATE_FLUSH_MS);
+}, 250);
 
-/* ---------------- initial render loop ---------------- */
+/* ---------------- periodic safety fill ---------------- */
 setInterval(() => {
     balancePipeline();
     rerenderAll();
 }, 1000);
+
+/* ---------------- optional local test data ----------------
+   Uncomment this ONLY if backend is not sending data and you want to test UI
+
+setTimeout(() => {
+    const sample = [
+        {symbol:"ADANIENT", ltp:2450, change:10, change_percent:0.4},
+        {symbol:"AXISBANK", ltp:1100, change:-12, change_percent:-1.1},
+        {symbol:"HDFCBANK", ltp:1600, change:8, change_percent:0.5},
+        {symbol:"ICICIBANK", ltp:1180, change:6, change_percent:0.3},
+        {symbol:"INFY", ltp:1520, change:-4, change_percent:-0.2},
+        {symbol:"RELIANCE", ltp:2890, change:14, change_percent:0.49},
+        {symbol:"SBIN", ltp:820, change:9, change_percent:1.1},
+        {symbol:"TCS", ltp:3980, change:-15, change_percent:-0.38}
+    ];
+
+    sample.forEach(item => handleIncomingTick(item));
+    balancePipeline();
+    rerenderAll();
+}, 1000);
+*/
 
 /* start */
 rerenderAll();
