@@ -16,134 +16,196 @@ html, body {
     overflow: hidden;
 }
 
+body {
+    line-height: 1;
+}
+
 .page {
+    margin: 0;
+    padding: 0;
     width: 100%;
+    background: #000;
     display: flex;
     flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
 }
 
 .ticker-row {
     overflow: hidden;
     display: flex;
     align-items: center;
+    background: #000;
+    position: relative;
+    margin: 0;
+    padding: 0;
 }
 
 .list1-row {
-    width: 2176px;
+    width: 2176px;   /* LEFT SCREEN */
     height: 128px;
 }
 
 .list2-row {
-    width: 2048px;
+    width: 2048px;   /* RIGHT SCREEN */
     height: 128px;
+    border-top: none;
 }
 
-/* GPU layer */
 .ticker-wrapper {
     display: flex;
-    width: max-content;
+    width: 100%;
     will-change: transform;
-    transform: translate3d(0,0,0);
-    transform: translateZ(0);
+    transform: translate3d(0, 0, 0);
     backface-visibility: hidden;
+    margin: 0;
+    padding: 0;
 }
 
 .ticker {
     display: flex;
+    align-items: center;
     white-space: nowrap;
+    width: 100%;
+    flex-shrink: 0;
+    margin: 0;
+    padding: 0;
 }
 
-/* UI unchanged */
 .stock {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     margin-right: 80px;
     min-width: 260px;
+    flex-shrink: 0;
 }
 
 .stock-text {
     display: flex;
     justify-content: space-between;
+    align-items: center;
     width: 100%;
     gap: 28px;
 }
 
 .symbol-ltp {
-    font-size: 55px;
     font-weight: bold;
+    font-size: 55px;
+    line-height: 1.10;
+    white-space: nowrap;
 }
 
 .change-arrow {
     font-size: 55px;
     font-weight: bold;
+    display: flex;
+    align-items: center;
+    line-height: 1.10;
+}
+
+.arrow {
+    margin-right: 2px;
 }
 
 .up { color: lime; }
 .down { color: red; }
+
+#measureBox {
+    position: absolute;
+    visibility: hidden;
+    left: -99999px;
+    top: -99999px;
+    white-space: nowrap;
+    pointer-events: none;
+    margin: 0;
+    padding: 0;
+}
 </style>
 </head>
 
 <body>
 
 <div class="page">
-
-    <!-- LEFT -->
     <div class="ticker-row list1-row">
-        <div class="ticker-wrapper" id="wrapper1">
+        <div class="ticker-wrapper">
             <div class="ticker" id="ticker1"></div>
         </div>
     </div>
 
-    <!-- RIGHT -->
     <div class="ticker-row list2-row">
-        <div class="ticker-wrapper" id="wrapper2">
+        <div class="ticker-wrapper">
             <div class="ticker" id="ticker2"></div>
         </div>
     </div>
-
 </div>
 
-<script>
-const socket = io();
+<div id="measureBox"></div>
 
-const wrapper1 = document.getElementById("wrapper1");
-const wrapper2 = document.getElementById("wrapper2");
+<script>
+console.log("SCRIPT LOADED");
+
+const socket = io();
 
 const ticker1 = document.getElementById("ticker1");
 const ticker2 = document.getElementById("ticker2");
+const measureBox = document.getElementById("measureBox");
 
-const LEFT_SCREEN_WIDTH = 2176;
+const LEFT_SCREEN_WIDTH = 2174;
+const RIGHT_SCREEN_WIDTH = 2048;
 
-/* ---------------- DATA ---------------- */
+const ROW1_FIXED_COUNT = 5;
+const ROW2_FIXED_COUNT = 5;
+
+const queue3State = new Map();
+let queue4 = [];
 let displayQueue = [];
-let pendingUpdates = {};
-let queue3State = new Map();
 
-/* ---------------- SYNC ENGINE ---------------- */
-let cycleWidth = 0;
+const pendingUpdates = {};
 
-/* 🔥 absolute-time speed */
-const SPEED = 0.02;
+const FRESH_MS = 15000;
+const APPLY_UPDATES_MS = 200;
+const BUILD_QUEUE4_MS = 1000;
+const STEP_INTERVAL_MS = 2000;
 
-/* optional global sync start (same for all screens) */
-const START_TIME = 1700000000000;
+const BASE_GAP = 80;
 
-/* ---------------- SOCKET ---------------- */
+let currentHead = 0;
+let isRendering = false;
+
+const MASTER_SYMBOLS = [
+    "ADANIENT","ADANIPORTS","APOLLOHOSP","ASIANPAINT","AXISBANK","BAJAJ-AUTO",
+    "BAJFINANCE","BAJAJFINSV","BEL","BHARTIARTL","CIPLA","COALINDIA",
+    "DRREDDY","EICHERMOT","GRASIM","HCLTECH","HDFCBANK","HDFCLIFE",
+    "HINDALCO","HINDUNILVR","ICICIBANK","INDUSINDBK","INDIGO","INFY","ITC",
+    "JIOFIN","JSWSTEEL","KOTAKBANK","LT","M&M","MARUTI","MAXHEALTH",
+    "NESTLEIND","NTPC","ONGC","POWERGRID","RELIANCE","SBILIFE","SBIN",
+    "SHRIRAMFIN","SUNPHARMA","TATACONSUM","TATAMOTORS","TATASTEEL","TCS",
+    "TECHM","TITAN","TRENT","ULTRACEMCO","WIPRO"
+].sort();
+
+socket.on("connect", () => {
+    console.log("✅ Connected to backend");
+});
+
+socket.on("connect_error", (err) => {
+    console.error("❌ connect_error:", err);
+});
+
 socket.on("stock_update", (data) => {
     pendingUpdates[data.symbol] = data;
 });
 
-/* ---------------- UI ---------------- */
 function formatSignedNumber(value) {
-    return value >= 0 ? `+${value}` : value;
+    return value >= 0 ? `+${value}` : `${value}`;
 }
 
-function makeStockHTML(data) {
+function makeStockHTML(data, gap = BASE_GAP) {
     const colorClass = data.change < 0 ? "down" : "up";
     const arrow = data.change >= 0 ? "▲" : "▼";
 
     return `
-        <div class="stock">
+        <div class="stock" data-symbol="${data.symbol}" style="margin-right:${gap}px;">
             <div class="stock-text">
                 <div>
                     <div class="symbol-ltp ${colorClass}">${data.symbol}</div>
@@ -162,70 +224,197 @@ function makeStockHTML(data) {
     `;
 }
 
-/* ---------------- RENDER ---------------- */
-function renderTicker() {
-    if (!displayQueue.length) return;
-
-    const html = displayQueue.map(makeStockHTML).join("");
-
-    ticker1.innerHTML = html + html;
-    ticker2.innerHTML = html + html;
-
-    cycleWidth = ticker1.scrollWidth / 2;
+function isFresh(entry) {
+    if (!entry || !entry.ts) return false;
+    return (Date.now() - entry.ts) <= FRESH_MS;
 }
 
-/* ---------------- PERFECT SYNC SCROLL ---------------- */
-function animate() {
-    requestAnimationFrame(animate);
-
-    if (!cycleWidth) return;
-
-    const now = Date.now() - START_TIME;
-
-    const x = (now * SPEED) % cycleWidth;
-
-    const leftOffset = x;
-    const rightOffset = x + LEFT_SCREEN_WIDTH;
-
-    wrapper1.style.transform = `translate3d(${-leftOffset}px,0,0)`;
-    wrapper2.style.transform = `translate3d(${-rightOffset}px,0,0)`;
+function queuesEqual(a, b) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+        if (a[i].symbol !== b[i].symbol) return false;
+        if (a[i].ltp !== b[i].ltp) return false;
+        if (a[i].change !== b[i].change) return false;
+        if (a[i].change_percent !== b[i].change_percent) return false;
+    }
+    return true;
 }
 
-/* ---------------- UPDATE QUEUE ---------------- */
-setInterval(() => {
+function measureStockWidth(item, gap = BASE_GAP) {
+    measureBox.innerHTML = makeStockHTML(item, gap);
+    const el = measureBox.firstElementChild;
+    if (!el) return 0;
+    const style = getComputedStyle(el);
+    return el.offsetWidth + parseFloat(style.marginRight || 0);
+}
+
+function normalizeHead() {
+    if (displayQueue.length === 0) {
+        currentHead = 0;
+        return;
+    }
+    currentHead = currentHead % displayQueue.length;
+    if (currentHead < 0) currentHead += displayQueue.length;
+}
+
+function applyPendingUpdatesToQueue3() {
     const symbols = Object.keys(pendingUpdates);
-    if (!symbols.length) return;
+    if (symbols.length === 0) return false;
 
     const now = Date.now();
+    let changed = false;
 
     for (const symbol of symbols) {
         const data = pendingUpdates[symbol];
-
         queue3State.set(symbol, {
             ...data,
-            ts: now
+            ts: now,
+            ready: true
         });
-
         delete pendingUpdates[symbol];
+        changed = true;
     }
 
-    const nextQueue = [];
+    return changed;
+}
 
-    for (const [, data] of queue3State) {
-        nextQueue.push(data);
+function rebuildQueue4() {
+    const nextQueue4 = [];
+
+    for (const symbol of MASTER_SYMBOLS) {
+        const entry = queue3State.get(symbol);
+        if (!isFresh(entry)) continue;
+        nextQueue4.push({ ...entry });
     }
 
-    nextQueue.sort((a, b) => a.symbol.localeCompare(b.symbol));
+    if (!queuesEqual(queue4, nextQueue4)) {
+        queue4 = nextQueue4;
+        displayQueue = nextQueue4;
+        normalizeHead();
+        return true;
+    }
 
-    displayQueue = nextQueue;
+    return false;
+}
 
-    renderTicker();
+function getSequentialItems(startIndex, count) {
+    const items = [];
+    if (displayQueue.length === 0) return items;
 
-}, 300);
+    for (let i = 0; i < count && i < displayQueue.length; i++) {
+        items.push(displayQueue[(startIndex + i) % displayQueue.length]);
+    }
+    return items;
+}
 
+function computeGapForFixedCount(items, rowWidth) {
+    if (items.length <= 1) return 0;
 
-/* ---------------- START ---------------- */
-animate();
+    let contentWidth = 0;
+    for (const item of items) {
+        contentWidth += measureStockWidth(item, 0);
+    }
+
+    const totalGapSpace = Math.max(rowWidth - contentWidth, 0);
+    const gapCount = items.length - 1;
+
+    return Math.max(Math.min(totalGapSpace / gapCount, 160), 20);
+}
+
+function renderRow(container, items, rowWidth) {
+    const gap = computeGapForFixedCount(items, rowWidth);
+
+    container.innerHTML = items.map((item, i) => {
+        const thisGap = i === items.length - 1 ? 0 : gap;
+        return makeStockHTML(item, thisGap);
+    }).join("");
+}
+
+function renderRows() {
+    if (isRendering) return;
+    isRendering = true;
+
+    if (displayQueue.length === 0) {
+        ticker1.innerHTML = "";
+        ticker2.innerHTML = "";
+        isRendering = false;
+        return;
+    }
+
+    normalizeHead();
+
+    const row1Items = getSequentialItems(currentHead, ROW1_FIXED_COUNT);
+    const row2Start = currentHead + row1Items.length;
+    const row2Items = getSequentialItems(row2Start, ROW2_FIXED_COUNT);
+
+    renderRow(ticker1, row1Items, LEFT_SCREEN_WIDTH);
+    renderRow(ticker2, row2Items, RIGHT_SCREEN_WIDTH);
+
+    isRendering = false;
+}
+
+function stepTicker() {
+    if (displayQueue.length === 0) return;
+    currentHead = (currentHead + 1) % displayQueue.length;
+    renderRows();
+}
+
+setInterval(() => {
+    const changed1 = applyPendingUpdatesToQueue3();
+    const changed2 = rebuildQueue4();
+
+    if (changed1 || changed2) {
+        renderRows();
+    }
+}, APPLY_UPDATES_MS);
+
+setInterval(() => {
+    const changed = rebuildQueue4();
+    if (changed) {
+        renderRows();
+    }
+}, BUILD_QUEUE4_MS);
+
+setInterval(() => {
+    stepTicker();
+}, STEP_INTERVAL_MS);
+
+/* Optional local test data
+setTimeout(() => {
+    const sample = [
+        {symbol:"ADANIENT", ltp:2450, change:10, change_percent:0.4},
+        {symbol:"ADANIPORTS", ltp:1609.2, change:27.8, change_percent:1.76},
+        {symbol:"APOLLOHOSP", ltp:806.2, change:10.75, change_percent:1.35},
+        {symbol:"ASIANPAINT", ltp:3012, change:-12.5, change_percent:-0.41},
+        {symbol:"AXISBANK", ltp:1100, change:-12, change_percent:-1.1},
+        {symbol:"HDFCBANK", ltp:1647.1, change:13.4, change_percent:0.82},
+        {symbol:"ICICIBANK", ltp:1180, change:6, change_percent:0.3},
+        {symbol:"INFY", ltp:1520, change:-4, change_percent:-0.2},
+        {symbol:"RELIANCE", ltp:2890, change:14, change_percent:0.49},
+        {symbol:"SBIN", ltp:820, change:9, change_percent:1.1},
+        {symbol:"TCS", ltp:3980, change:-15, change_percent:-0.38},
+        {symbol:"WIPRO", ltp:510, change:3, change_percent:0.6},
+        {symbol:"TITAN", ltp:3450, change:-9, change_percent:-0.25},
+        {symbol:"ULTRACEMCO", ltp:10200, change:22, change_percent:0.21},
+        {symbol:"LT", ltp:3650, change:18, change_percent:0.5},
+        {symbol:"M&M", ltp:2780, change:11, change_percent:0.39},
+        {symbol:"POWERGRID", ltp:331, change:2, change_percent:0.61},
+        {symbol:"SUNPHARMA", ltp:1718, change:-6, change_percent:-0.35},
+        {symbol:"TECHM", ltp:1321, change:9, change_percent:0.69},
+        {symbol:"TRENT", ltp:5102, change:31, change_percent:0.61}
+    ];
+
+    const now = Date.now();
+    for (const item of sample) {
+        queue3State.set(item.symbol, { ...item, ts: now, ready: true });
+    }
+
+    rebuildQueue4();
+    renderRows();
+}, 1000);
+*/
+
+renderRows();
 </script>
 
 </body>
