@@ -16,144 +16,102 @@ html, body {
     overflow: hidden;
 }
 
-body {
-    line-height: 1;
-}
-
 .page {
-    margin: 0;
-    padding: 0;
     width: 100%;
-    background: #000;
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: 0;
 }
 
 .ticker-row {
     overflow: hidden;
     display: flex;
     align-items: center;
-    background: #000;
-    position: relative;
-    margin: 0;
-    padding: 0;
 }
 
 .list1-row {
-    width: 2176px;   /* LEFT SCREEN */
+    width: 2176px;
     height: 128px;
 }
 
 .list2-row {
-    width: 2048px;   /* RIGHT SCREEN */
+    width: 2048px;
     height: 128px;
-    border-top: none;
 }
 
+/* GPU layer */
 .ticker-wrapper {
     display: flex;
-    width: 100%;
+    width: max-content;
     will-change: transform;
-    transform: translate3d(0, 0, 0);
+    transform: translate3d(0,0,0);
+    transform: translateZ(0);
     backface-visibility: hidden;
-    margin: 0;
-    padding: 0;
 }
 
 .ticker {
     display: flex;
-    align-items: center;
     white-space: nowrap;
-    width: 100%;
-    flex-shrink: 0;
-    margin: 0;
-    padding: 0;
 }
 
+/* UI unchanged */
 .stock {
     display: flex;
     align-items: center;
-    justify-content: space-between;
     margin-right: 80px;
     min-width: 260px;
-    flex-shrink: 0;
 }
 
 .stock-text {
     display: flex;
     justify-content: space-between;
-    align-items: center;
     width: 100%;
     gap: 28px;
 }
 
 .symbol-ltp {
-    font-weight: bold;
     font-size: 55px;
-    line-height: 1.10;
-    white-space: nowrap;
+    font-weight: bold;
 }
 
 .change-arrow {
     font-size: 55px;
     font-weight: bold;
-    display: flex;
-    align-items: center;
-    line-height: 1.10;
-}
-
-.arrow {
-    margin-right: 2px;
 }
 
 .up { color: lime; }
 .down { color: red; }
-
-#measureBox {
-    position: absolute;
-    visibility: hidden;
-    left: -99999px;
-    top: -99999px;
-    white-space: nowrap;
-    pointer-events: none;
-    margin: 0;
-    padding: 0;
-}
 </style>
 </head>
 
 <body>
 
 <div class="page">
+
+    <!-- LEFT -->
     <div class="ticker-row list1-row">
-        <div class="ticker-wrapper">
+        <div class="ticker-wrapper" id="wrapper1">
             <div class="ticker" id="ticker1"></div>
         </div>
     </div>
 
+    <!-- RIGHT -->
     <div class="ticker-row list2-row">
-        <div class="ticker-wrapper">
+        <div class="ticker-wrapper" id="wrapper2">
             <div class="ticker" id="ticker2"></div>
         </div>
     </div>
+
 </div>
 
-<div id="measureBox"></div>
-
 <script>
-console.log("SMOOTH ENGINE LOADED");
-
 const socket = io();
 
-const wrapper1 = document.querySelector(".list1-row .ticker-wrapper");
-const wrapper2 = document.querySelector(".list2-row .ticker-wrapper");
+const wrapper1 = document.getElementById("wrapper1");
+const wrapper2 = document.getElementById("wrapper2");
 
 const ticker1 = document.getElementById("ticker1");
 const ticker2 = document.getElementById("ticker2");
 
-/* ---------------- FIX WIDTH ---------------- */
 const LEFT_SCREEN_WIDTH = 2176;
 
 /* ---------------- DATA ---------------- */
@@ -161,12 +119,14 @@ let displayQueue = [];
 let pendingUpdates = {};
 let queue3State = new Map();
 
-/* ---------------- SCROLL ENGINE ---------------- */
-let globalX = 0;
+/* ---------------- SYNC ENGINE ---------------- */
 let cycleWidth = 0;
-let lastTime = performance.now();
 
-const SPEED = 1.4; // 🔧 smooth speed
+/* 🔥 absolute-time speed */
+const SPEED = 0.02;
+
+/* optional global sync start (same for all screens) */
+const START_TIME = 1700000000000;
 
 /* ---------------- SOCKET ---------------- */
 socket.on("stock_update", (data) => {
@@ -202,35 +162,30 @@ function makeStockHTML(data) {
     `;
 }
 
-/* ---------------- RENDER (ONCE) ---------------- */
+/* ---------------- RENDER ---------------- */
 function renderTicker() {
-    if (displayQueue.length === 0) return;
+    if (!displayQueue.length) return;
 
     const html = displayQueue.map(makeStockHTML).join("");
 
-    ticker1.innerHTML = html + html; // duplicate for loop
+    ticker1.innerHTML = html + html;
     ticker2.innerHTML = html + html;
 
-    cycleWidth = ticker1.scrollWidth / 2; // important
+    cycleWidth = ticker1.scrollWidth / 2;
 }
 
-/* ---------------- SMOOTH SCROLL ---------------- */
-function animate(now) {
+/* ---------------- PERFECT SYNC SCROLL ---------------- */
+function animate() {
     requestAnimationFrame(animate);
 
     if (!cycleWidth) return;
 
-    const delta = now - lastTime;
-    lastTime = now;
+    const now = Date.now() - START_TIME;
 
-    globalX += SPEED * (delta / 16.67);
+    const x = (now * SPEED) % cycleWidth;
 
-    if (globalX >= cycleWidth) {
-        globalX -= cycleWidth;
-    }
-
-    const leftOffset = globalX;
-    const rightOffset = globalX + LEFT_SCREEN_WIDTH;
+    const leftOffset = x;
+    const rightOffset = x + LEFT_SCREEN_WIDTH;
 
     wrapper1.style.transform = `translate3d(${-leftOffset}px,0,0)`;
     wrapper2.style.transform = `translate3d(${-rightOffset}px,0,0)`;
@@ -254,10 +209,9 @@ setInterval(() => {
         delete pendingUpdates[symbol];
     }
 
-    // rebuild sorted queue4
     const nextQueue = [];
 
-    for (const [symbol, data] of queue3State.entries()) {
+    for (const [, data] of queue3State) {
         nextQueue.push(data);
     }
 
@@ -265,26 +219,14 @@ setInterval(() => {
 
     displayQueue = nextQueue;
 
-    renderTicker(); // 🔥 only here
+    renderTicker();
 
 }, 300);
 
-/* ---------------- TEST DATA (REMOVE LATER) ---------------- */
-setTimeout(() => {
-    displayQueue = [
-        {symbol:"RELIANCE", ltp:2890, change:10, change_percent:0.4},
-        {symbol:"TCS", ltp:3980, change:-5, change_percent:-0.2},
-        {symbol:"INFY", ltp:1520, change:4, change_percent:0.3},
-        {symbol:"HDFCBANK", ltp:1647, change:6, change_percent:0.2},
-        {symbol:"SBIN", ltp:820, change:3, change_percent:0.1},
-        {symbol:"ITC", ltp:450, change:-2, change_percent:-0.4},
-        {symbol:"LT", ltp:3650, change:8, change_percent:0.5}
-    ];
-    renderTicker();
-}, 500);
 
 /* ---------------- START ---------------- */
 animate();
 </script>
+
 </body>
 </html>
