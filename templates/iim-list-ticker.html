@@ -8,22 +8,27 @@
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 
 <style>
-body {
+html, body {
     margin: 0;
+    padding: 0;
     background: #000;
     font-family: 'Teko', sans-serif;
     overflow: hidden;
 }
 
+body {
+    line-height: 1;
+}
+
 .page {
-    margin-top: 2px;
+    margin: 0;
+    padding: 0;
     width: 100%;
     background: #000;
     display: flex;
     flex-direction: column;
     align-items: flex-start;
     gap: 0;
-    padding-top: 2px;
 }
 
 .ticker-row {
@@ -32,6 +37,8 @@ body {
     align-items: center;
     background: #000;
     position: relative;
+    margin: 0;
+    padding: 0;
 }
 
 .list1-row {
@@ -42,6 +49,7 @@ body {
 .list2-row {
     width: 2048px;   /* RIGHT SCREEN */
     height: 128px;
+    border-top: none;
 }
 
 .ticker-wrapper {
@@ -50,6 +58,8 @@ body {
     will-change: transform;
     transform: translate3d(0, 0, 0);
     backface-visibility: hidden;
+    margin: 0;
+    padding: 0;
 }
 
 .ticker {
@@ -58,6 +68,8 @@ body {
     white-space: nowrap;
     width: 100%;
     flex-shrink: 0;
+    margin: 0;
+    padding: 0;
 }
 
 .stock {
@@ -99,10 +111,6 @@ body {
 .up { color: lime; }
 .down { color: red; }
 
-.list2-row {
-    border-top: 1px solid rgba(255,255,255,0.05);
-}
-
 #measureBox {
     position: absolute;
     visibility: hidden;
@@ -110,6 +118,8 @@ body {
     top: -99999px;
     white-space: nowrap;
     pointer-events: none;
+    margin: 0;
+    padding: 0;
 }
 </style>
 </head>
@@ -145,7 +155,7 @@ const LEFT_SCREEN_WIDTH = 2176;
 const RIGHT_SCREEN_WIDTH = 2048;
 
 const ROW1_FIXED_COUNT = 5;
-const ROW2_FIXED_COUNT = 5; // change to 6 if you want more on row 2
+const ROW2_FIXED_COUNT = 5;
 
 const queue3State = new Map();
 let queue4 = [];
@@ -298,8 +308,7 @@ function getSequentialItems(startIndex, count) {
 }
 
 function computeGapForFixedCount(items, rowWidth) {
-    if (items.length === 0) return 0;
-    if (items.length === 1) return 0;
+    if (items.length <= 1) return 0;
 
     let contentWidth = 0;
     for (const item of items) {
