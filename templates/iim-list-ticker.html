@@ -321,17 +321,18 @@ function applyTransforms() {
 }
 
 /* ---------------- animation ---------------- */
-function animate() {
-    requestAnimationFrame(animate);
+let lastTime = performance.now();
 
-    if (needsRender) {
-        renderSharedStream();
-        applyTransforms();
-    }
+function animate(now) {
+    requestAnimationFrame(animate);
 
     if (!cycleWidth || displayQueue.length === 0) return;
 
-    globalX += SPEED;
+    const delta = now - lastTime;
+    lastTime = now;
+
+    // 🎯 Smooth motion independent of FPS
+    globalX += SPEED * (delta / 16.67); // normalized to 60fps
 
     if (globalX >= cycleWidth) {
         globalX -= cycleWidth;
