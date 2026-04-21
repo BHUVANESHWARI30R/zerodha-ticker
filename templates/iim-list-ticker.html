@@ -23,6 +23,7 @@ body {
     gap: 0;
 }
 
+/* ROWS */
 .ticker-row {
     overflow: hidden;
     display: flex;
@@ -40,6 +41,7 @@ body {
     height: 120px;
 }
 
+/* SCROLL LAYER */
 .ticker-wrapper {
     display: flex;
     width: max-content;
@@ -48,12 +50,14 @@ body {
     backface-visibility: hidden;
 }
 
+/* CONTENT */
 .ticker {
     display: flex;
     align-items: center;
     white-space: nowrap;
 }
 
+/* STOCK UI (UNCHANGED) */
 .stock {
     display: flex;
     align-items: center;
@@ -122,15 +126,18 @@ const ticker2Clone = document.getElementById("ticker2-clone");
 
 const LEFT_SCREEN_WIDTH = 2176;
 
+/* ---------------- DATA ---------------- */
 let displayQueue = [];
 let pendingUpdates = {};
 
+/* ---------------- SCROLL ENGINE ---------------- */
 let globalX = 0;
 let cycleWidth = 0;
+let lastTime = performance.now();
 
-const SPEED = 2.2;
+const SPEED = 1.6; // 🔧 adjust speed here
 
-/* ---------------- socket ---------------- */
+/* ---------------- SOCKET ---------------- */
 socket.on("connect", () => {
     console.log("✅ Connected");
 });
@@ -139,7 +146,7 @@ socket.on("stock_update", (data) => {
     pendingUpdates[data.symbol] = data;
 });
 
-/* ---------------- helpers ---------------- */
+/* ---------------- UI ---------------- */
 function formatSignedNumber(value) {
     return value >= 0 ? `+${value}` : value;
 }
@@ -163,9 +170,9 @@ function makeStockHTML(data) {
     `;
 }
 
-/* ---------------- render ---------------- */
-function renderSharedStream() {
-    if (displayQueue.length === 0) return;
+/* ---------------- RENDER (NO FREQUENT REBUILD) ---------------- */
+function renderTicker() {
+    if (!displayQueue.length) return;
 
     const html = displayQueue.map(makeStockHTML).join("");
 
@@ -178,9 +185,7 @@ function renderSharedStream() {
     cycleWidth = ticker1.scrollWidth;
 }
 
-/* ---------------- smooth animation ---------------- */
-let lastTime = performance.now();
-
+/* ---------------- SMOOTH ANIMATION ---------------- */
 function animate(now) {
     requestAnimationFrame(animate);
 
@@ -195,14 +200,14 @@ function animate(now) {
         globalX -= cycleWidth;
     }
 
-    const offsetLeft = globalX % cycleWidth;
-    const offsetRight = (globalX + LEFT_SCREEN_WIDTH) % cycleWidth;
+    const leftOffset = globalX;
+    const rightOffset = globalX + LEFT_SCREEN_WIDTH;
 
-    wrapper1.style.transform = `translate3d(${-offsetLeft}px,0,0)`;
-    wrapper2.style.transform = `translate3d(${-offsetRight}px,0,0)`;
+    wrapper1.style.transform = `translate3d(${-leftOffset}px,0,0)`;
+    wrapper2.style.transform = `translate3d(${-rightOffset}px,0,0)`;
 }
 
-/* ---------------- update queue ---------------- */
+/* ---------------- UPDATE QUEUE (NO JITTER) ---------------- */
 setInterval(() => {
     const symbols = Object.keys(pendingUpdates);
     if (!symbols.length) return;
@@ -219,9 +224,26 @@ setInterval(() => {
         delete pendingUpdates[symbol];
     }
 
-    renderSharedStream();
+    renderTicker(); // 🔥 only here
 }, 300);
 
+/* ---------------- TEST DATA (REMOVE IN PRODUCTION) ---------------- */
+setTimeout(() => {
+    displayQueue = [
+        {symbol:"RELIANCE", ltp:2890, change:10},
+        {symbol:"TCS", ltp:3980, change:-5},
+        {symbol:"INFY", ltp:1520, change:4},
+        {symbol:"HDFCBANK", ltp:1647, change:6},
+        {symbol:"SBIN", ltp:820, change:3},
+        {symbol:"ITC", ltp:450, change:-2},
+        {symbol:"LT", ltp:3650, change:8},
+        {symbol:"AXISBANK", ltp:1100, change:-4},
+        {symbol:"KOTAKBANK", ltp:1760, change:2}
+    ];
+    renderTicker();
+}, 500);
+
+/* ---------------- START ---------------- */
 animate();
 </script>
 
