@@ -49,6 +49,7 @@ body {
     width: max-content;
     will-change: transform;
     transform: translate3d(0, 0, 0);
+    backface-visibility: hidden;
 }
 
 .ticker {
@@ -100,6 +101,16 @@ body {
 .list2-row {
     border-top: 1px solid rgba(255,255,255,0.05);
 }
+
+/* hidden measurer */
+#measureBox {
+    position: absolute;
+    visibility: hidden;
+    left: -99999px;
+    top: -99999px;
+    white-space: nowrap;
+    pointer-events: none;
+}
 </style>
 </head>
 
@@ -110,7 +121,6 @@ body {
     <div class="ticker-row list1-row">
         <div class="ticker-wrapper" id="wrapper1">
             <div class="ticker" id="ticker1"></div>
-            <div class="ticker" id="ticker1-clone"></div>
         </div>
     </div>
 
@@ -118,26 +128,20 @@ body {
     <div class="ticker-row list2-row">
         <div class="ticker-wrapper" id="wrapper2">
             <div class="ticker" id="ticker2"></div>
-            <div class="ticker" id="ticker2-clone"></div>
         </div>
     </div>
 </div>
 
-
+<div id="measureBox"></div>
 
 <script>
 console.log("SCRIPT LOADED");
 
 const socket = io();
 
-const wrapper1 = document.getElementById("wrapper1"); // LEFT
-const wrapper2 = document.getElementById("wrapper2"); // RIGHT
-
-const ticker1 = document.getElementById("ticker1");
-const ticker1Clone = document.getElementById("ticker1-clone");
-
-const ticker2 = document.getElementById("ticker2");
-const ticker2Clone = document.getElementById("ticker2-clone");
+const ticker1 = document.getElementById("ticker1"); // LEFT
+const ticker2 = document.getElementById("ticker2"); // RIGHT
+const measureBox = document.getElementById("measureBox");
 
 /* =========================================================
    SCREEN MODEL
@@ -147,15 +151,15 @@ const ticker2Clone = document.getElementById("ticker2-clone");
    DATA MODEL
    queue3State = realtime latest stock state
    queue4      = sorted fresh display-ready queue
-   displayQueue = single continuous stream for BOTH screens
+   displayQueue = single ordered stock stream
 ========================================================= */
 
 const LEFT_SCREEN_WIDTH = 2176;
 const RIGHT_SCREEN_WIDTH = 2048;
 
 const queue3State = new Map();   // symbol -> latest payload + timestamp
-let queue4 = [];                 // sorted fresh batch
-let displayQueue = [];           // one shared stream
+let queue4 = [];
+let displayQueue = [];
 
 const pendingUpdates = {};
 
@@ -163,12 +167,15 @@ const FRESH_MS = 15000;
 const APPLY_UPDATES_MS = 200;
 const BUILD_QUEUE4_MS = 1000;
 
-//UPDATED SPEED 
-const SPEED = 3.0;
+/*
+  STEP MODE:
+  - no stock gets cut at the split
+  - ticker advances one stock at a time
+*/
+const STEP_INTERVAL_MS = 700;
 
-let globalX = 0;
-let cycleWidth = 0;
-let needsRender = true;
+let currentHead = 0;
+let isRendering = false;
 
 const MASTER_SYMBOLS = [
     "ADANIENT","ADANIPORTS","APOLLOHOSP","ASIANPAINT","AXISBANK","BAJAJ-AUTO",
@@ -240,12 +247,30 @@ function queuesEqual(a, b) {
     return true;
 }
 
+function measureStockWidth(item) {
+    measureBox.innerHTML = makeStockHTML(item);
+    const el = measureBox.firstElementChild;
+    if (!el) return 0;
+    const style = getComputedStyle(el);
+    return el.offsetWidth + parseFloat(style.marginRight || 0);
+}
+
+function normalizeHead() {
+    if (displayQueue.length === 0) {
+        currentHead = 0;
+        return;
+    }
+    currentHead = currentHead % displayQueue.length;
+    if (currentHead < 0) currentHead += displayQueue.length;
+}
+
 /* ---------------- queue3 realtime state ---------------- */
 function applyPendingUpdatesToQueue3() {
     const symbols = Object.keys(pendingUpdates);
-    if (symbols.length === 0) return;
+    if (symbols.length === 0) return false;
 
     const now = Date.now();
+    let changed = false;
 
     for (const symbol of symbols) {
         const data = pendingUpdates[symbol];
@@ -257,7 +282,10 @@ function applyPendingUpdatesToQueue3() {
         });
 
         delete pendingUpdates[symbol];
+        changed = true;
     }
+
+    return changed;
 }
 
 /* ---------------- queue4 sorted fresh display queue ---------------- */
@@ -273,93 +301,107 @@ function rebuildQueue4() {
     if (!queuesEqual(queue4, nextQueue4)) {
         queue4 = nextQueue4;
         displayQueue = nextQueue4;
-        needsRender = true;
+        normalizeHead();
+        return true;
     }
+
+    return false;
+}
+
+/* ---------------- segmentation ----------------
+   Build row1 and row2 so split always happens BETWEEN stocks
+*/
+function buildSegments() {
+    const leftItems = [];
+    const rightItems = [];
+
+    if (displayQueue.length === 0) {
+        return { leftItems, rightItems };
+    }
+
+    normalizeHead();
+
+    let idx = currentHead;
+    let leftUsed = 0;
+
+    while (leftItems.length < displayQueue.length) {
+        const item = displayQueue[idx % displayQueue.length];
+        const w = measureStockWidth(item);
+
+        if (leftItems.length > 0 && leftUsed + w > LEFT_SCREEN_WIDTH) break;
+
+        leftItems.push(item);
+        leftUsed += w;
+        idx++;
+    }
+
+    let rightUsed = 0;
+
+    while ((rightItems.length + leftItems.length) < displayQueue.length) {
+        const item = displayQueue[idx % displayQueue.length];
+        const w = measureStockWidth(item);
+
+        if (rightItems.length > 0 && rightUsed + w > RIGHT_SCREEN_WIDTH) break;
+
+        rightItems.push(item);
+        rightUsed += w;
+        idx++;
+    }
+
+    return { leftItems, rightItems };
 }
 
 /* ---------------- rendering ---------------- */
-function renderSharedStream() {
+function renderRows() {
+    if (isRendering) return;
+    isRendering = true;
+
     if (displayQueue.length === 0) {
         ticker1.innerHTML = "";
-        ticker1Clone.innerHTML = "";
         ticker2.innerHTML = "";
-        ticker2Clone.innerHTML = "";
-        cycleWidth = 0;
-        wrapper1.style.transform = "translate3d(0,0,0)";
-        wrapper2.style.transform = "translate3d(0,0,0)";
-        needsRender = false;
+        isRendering = false;
         return;
     }
 
-    const streamHTML = displayQueue.map(makeStockHTML).join("");
+    const { leftItems, rightItems } = buildSegments();
 
-    /* same exact stream for both screens */
-    ticker1.innerHTML = streamHTML;
-    ticker1Clone.innerHTML = streamHTML;
+    ticker1.innerHTML = leftItems.map(makeStockHTML).join("");
+    ticker2.innerHTML = rightItems.map(makeStockHTML).join("");
 
-    ticker2.innerHTML = streamHTML;
-    ticker2Clone.innerHTML = streamHTML;
-
-    /* width of ONE full stream copy */
-    cycleWidth = ticker1.scrollWidth;
-
-    needsRender = false;
+    isRendering = false;
 }
 
-/* ---------------- sync transforms ----------------
-   row1 shows left screen segment
-   row2 shows continuation after left screen width
+/* ---------------- step ticker ----------------
+   Advance one full stock at a time.
+   This guarantees no stock is cut at the split.
 */
-function applyTransforms() {
-    if (!cycleWidth || displayQueue.length === 0) return;
+function stepTicker() {
+    if (displayQueue.length === 0) return;
 
-    const leftOffset = globalX % cycleWidth;
-    const rightOffset = (globalX + LEFT_SCREEN_WIDTH) % cycleWidth;
-
-    wrapper1.style.transform = `translate3d(${-leftOffset}px, 0, 0)`;
-    wrapper2.style.transform = `translate3d(${-rightOffset}px, 0, 0)`;
-}
-
-/* ---------------- animation ---------------- */
-let lastTime = performance.now();
-
-function animate(now) {
-    requestAnimationFrame(animate);
-
-    if (!cycleWidth || displayQueue.length === 0) return;
-
-    const delta = now - lastTime;
-    lastTime = now;
-
-    // 🎯 Smooth motion independent of FPS
-    globalX += SPEED * (delta / 16.67); // normalized to 60fps
-
-    if (globalX >= cycleWidth) {
-        globalX -= cycleWidth;
-    }
-
-    applyTransforms();
+    currentHead = (currentHead + 1) % displayQueue.length;
+    renderRows();
 }
 
 /* ---------------- schedulers ---------------- */
 setInterval(() => {
-    applyPendingUpdatesToQueue3();
-    rebuildQueue4();
+    const changed1 = applyPendingUpdatesToQueue3();
+    const changed2 = rebuildQueue4();
 
-    if (needsRender) {
-        renderSharedStream();
-        applyTransforms();
+    if (changed1 || changed2) {
+        renderRows();
     }
 }, APPLY_UPDATES_MS);
 
 setInterval(() => {
-    rebuildQueue4();
-
-    if (needsRender) {
-        renderSharedStream();
-        applyTransforms();
+    const changed = rebuildQueue4();
+    if (changed) {
+        renderRows();
     }
 }, BUILD_QUEUE4_MS);
+
+setInterval(() => {
+    stepTicker();
+}, STEP_INTERVAL_MS);
 
 /* ---------------- optional local test data ----------------
 setTimeout(() => {
@@ -392,15 +434,12 @@ setTimeout(() => {
     }
 
     rebuildQueue4();
-    renderSharedStream();
-    applyTransforms();
+    renderRows();
 }, 1000);
 */
 
 /* ---------------- start ---------------- */
-renderSharedStream();
-applyTransforms();
-animate();
+renderRows();
 </script>
 
 </body>
