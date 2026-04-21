@@ -157,10 +157,13 @@ const params = new URLSearchParams(window.location.search);
 const screenMode = params.get("screen") || "both";
 
 if (screenMode === "1") {
-    row2.style.display = "none";
+    row2.style.visibility = "hidden";
+    row2.style.position = "absolute";
 }
+
 if (screenMode === "2") {
-    row1.style.display = "none";
+    row1.style.visibility = "hidden";
+    row1.style.position = "absolute";
 }
 
 /* ---------------- CONSTANTS ---------------- */
@@ -237,7 +240,7 @@ function renderTicker() {
     ticker2.innerHTML = html;
     ticker2Clone.innerHTML = html;
 
-    cycleWidth = ticker1.scrollWidth;
+    cycleWidth = ticker1.scrollWidth || ticker2.scrollWidth;
 }
 
 /* ---------------- ABSOLUTE-TIME SYNC ---------------- */
