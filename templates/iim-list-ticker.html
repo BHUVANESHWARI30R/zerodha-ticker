@@ -8,8 +8,9 @@
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 
 <style>
-body {
+html, body {
     margin: 0;
+    padding: 0;
     background: #000;
     font-family: 'Teko', sans-serif;
     overflow: hidden;
@@ -20,10 +21,8 @@ body {
     background: #000;
     display: flex;
     flex-direction: column;
-    gap: 0;
 }
 
-/* ROWS */
 .ticker-row {
     overflow: hidden;
     display: flex;
@@ -33,12 +32,12 @@ body {
 
 .list1-row {
     width: 2176px;
-    height: 120px;
+    height: 128px;
 }
 
 .list2-row {
     width: 2048px;
-    height: 120px;
+    height: 128px;
 }
 
 /* SCROLL LAYER */
@@ -94,7 +93,7 @@ body {
 
 <div class="page">
 
-    <!-- LEFT SCREEN -->
+    <!-- ROW 1 (LEFT) -->
     <div class="ticker-row list1-row">
         <div class="ticker-wrapper" id="wrapper1">
             <div class="ticker" id="ticker1"></div>
@@ -102,7 +101,7 @@ body {
         </div>
     </div>
 
-    <!-- RIGHT SCREEN -->
+    <!-- ROW 2 (RIGHT) -->
     <div class="ticker-row list2-row">
         <div class="ticker-wrapper" id="wrapper2">
             <div class="ticker" id="ticker2"></div>
@@ -135,7 +134,7 @@ let globalX = 0;
 let cycleWidth = 0;
 let lastTime = performance.now();
 
-const SPEED = 1.6; // 🔧 adjust speed here
+const SPEED = 1.5; // 🔧 adjust speed here
 
 /* ---------------- SOCKET ---------------- */
 socket.on("connect", () => {
@@ -170,7 +169,7 @@ function makeStockHTML(data) {
     `;
 }
 
-/* ---------------- RENDER (NO FREQUENT REBUILD) ---------------- */
+/* ---------------- RENDER ---------------- */
 function renderTicker() {
     if (!displayQueue.length) return;
 
@@ -185,7 +184,7 @@ function renderTicker() {
     cycleWidth = ticker1.scrollWidth;
 }
 
-/* ---------------- SMOOTH ANIMATION ---------------- */
+/* ---------------- SMOOTH SCROLL ---------------- */
 function animate(now) {
     requestAnimationFrame(animate);
 
@@ -207,7 +206,7 @@ function animate(now) {
     wrapper2.style.transform = `translate3d(${-rightOffset}px,0,0)`;
 }
 
-/* ---------------- UPDATE QUEUE (NO JITTER) ---------------- */
+/* ---------------- UPDATE QUEUE ---------------- */
 setInterval(() => {
     const symbols = Object.keys(pendingUpdates);
     if (!symbols.length) return;
@@ -224,26 +223,12 @@ setInterval(() => {
         delete pendingUpdates[symbol];
     }
 
-    renderTicker(); // 🔥 only here
+    renderTicker();
 }, 300);
 
-/* ---------------- TEST DATA (REMOVE IN PRODUCTION) ---------------- */
-setTimeout(() => {
-    displayQueue = [
-        {symbol:"RELIANCE", ltp:2890, change:10},
-        {symbol:"TCS", ltp:3980, change:-5},
-        {symbol:"INFY", ltp:1520, change:4},
-        {symbol:"HDFCBANK", ltp:1647, change:6},
-        {symbol:"SBIN", ltp:820, change:3},
-        {symbol:"ITC", ltp:450, change:-2},
-        {symbol:"LT", ltp:3650, change:8},
-        {symbol:"AXISBANK", ltp:1100, change:-4},
-        {symbol:"KOTAKBANK", ltp:1760, change:2}
-    ];
-    renderTicker();
-}, 500);
 
 /* ---------------- START ---------------- */
+renderTicker();
 animate();
 </script>
 
