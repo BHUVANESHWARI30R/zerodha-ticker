@@ -1,0 +1,383 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>DigiWave Stock Ticker</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
+<style>
+body {
+    margin: 0;
+    background: #000;
+    font-family: 'Teko', sans-serif;
+    overflow: hidden;
+}
+
+/* page layout */
+.page {
+    width: 100%;
+    background: #000;
+    padding-top: 2px;
+}
+
+/* visible ticker rows */
+.ticker-row {
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    background: #000;
+    position: relative;
+}
+
+.ticker-row.list1-row {
+    width: 2176px;
+    height: 120px;
+    margin: 0;
+}
+
+.ticker-row.list2-row {
+    width: 2048px;
+    height: 120px;
+    margin: 0;
+}
+
+/* wrappers */
+.ticker-wrapper {
+    display: flex;
+    width: max-content;
+    will-change: transform;
+}
+
+.ticker {
+    display: flex;
+    align-items: center;
+    white-space: nowrap;
+}
+
+/* stock item */
+.stock {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-right: 80px;
+    min-width: 260px;
+}
+
+.stock-text {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    gap: 28px;
+}
+
+.symbol-ltp {
+    font-weight: bold;
+    font-size: 55px;
+    line-height: 1.10;
+    white-space: nowrap;
+}
+
+.change-arrow {
+    font-size: 55px;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    line-height: 1.10;
+}
+
+.arrow {
+    margin-right: 2px;
+}
+
+.up { color: lime; }
+.down { color: red; }
+
+/* optional subtle row separation */
+.list2-row {
+    border-top: 1px solid rgba(255,255,255,0.04);
+}
+</style>
+</head>
+
+<body>
+
+<div class="page">
+    <!-- LIST 1 : top visible final feed -->
+    <div class="ticker-row list1-row">
+        <div class="ticker-wrapper" id="wrapper1">
+            <div class="ticker" id="ticker1"></div>
+            <div class="ticker" id="ticker1-clone"></div>
+        </div>
+    </div>
+
+    <!-- LIST 2 : second visible final feed -->
+    <div class="ticker-row list2-row">
+        <div class="ticker-wrapper" id="wrapper2">
+            <div class="ticker" id="ticker2"></div>
+            <div class="ticker" id="ticker2-clone"></div>
+        </div>
+    </div>
+</div>
+
+<script>
+    console.log("SCRIPT LOADED");
+const socket = io();
+
+socket.on("connect", () => {
+    console.log("✅ Connected to backend");
+});
+
+
+/* ---------------- DOM refs ---------------- */
+const wrapper1 = document.getElementById("wrapper1");
+const wrapper2 = document.getElementById("wrapper2");
+
+const ticker1 = document.getElementById("ticker1");
+const ticker1Clone = document.getElementById("ticker1-clone");
+
+const ticker2 = document.getElementById("ticker2");
+const ticker2Clone = document.getElementById("ticker2-clone");
+
+/* ---------------- pipeline lists ----------------
+   list1 = top visible final feed
+   list2 = second visible final feed
+   list3 = storage only
+*/
+let list1 = [];
+let list2 = [];
+let list3 = [];
+
+/* quick lookup for incoming batched updates */
+const pendingUpdates = {};
+
+/* tuning */
+const MAX_LIST1 = 8;      // visible items in top row
+const MAX_LIST2 = 8;      // visible items in second row
+const UPDATE_FLUSH_MS = 250;
+
+/* scrolling speed in px per frame */
+const SPEED1 = 1.1;       // top row speed
+const SPEED2 = 1.1;       // second row speed
+
+let pos1 = 0;
+let pos2 = 0;
+
+/* ---------------- socket debug ---------------- */
+socket.on("connect", () => {
+    console.log("✅ Connected to backend");
+});
+
+socket.on("stock_update", data => {
+    pendingUpdates[data.symbol] = data;
+});
+
+/* ---------------- helpers ---------------- */
+function formatSignedNumber(value) {
+    return value >= 0 ? `+${value}` : `${value}`;
+}
+
+function makeStockHTML(data) {
+    const colorClass = data.change < 0 ? "down" : "up";
+    const arrow = data.change >= 0 ? "▲" : "▼";
+
+    return `
+        <div class="stock" data-symbol="${data.symbol}">
+            <div class="stock-text">
+                <div>
+                    <div class="symbol-ltp ${colorClass}">${data.symbol}</div>
+                    <div class="symbol-ltp ${colorClass}">${data.ltp}</div>
+                </div>
+
+                <div class="change-arrow ${colorClass}" style="flex-direction: column; align-items: flex-end;">
+                    <div>(${data.change_percent}%)</div>
+                    <div>
+                        <span class="arrow">${arrow}</span>
+                        <span>${formatSignedNumber(data.change)}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function renderList(list, container, cloneContainer) {
+    container.innerHTML = list.map(makeStockHTML).join("");
+    cloneContainer.innerHTML = list.map(makeStockHTML).join("");
+}
+
+function rerenderAll() {
+    renderList(list1, ticker1, ticker1Clone);
+    renderList(list2, ticker2, ticker2Clone);
+
+    /* reset scroll positions if list content vanished */
+    if (list1.length === 0) {
+        pos1 = 0;
+        wrapper1.style.transform = `translate3d(0,0,0)`;
+    }
+    if (list2.length === 0) {
+        pos2 = 0;
+        wrapper2.style.transform = `translate3d(0,0,0)`;
+    }
+}
+
+function findSymbolIndex(list, symbol) {
+    return list.findIndex(item => item.symbol === symbol);
+}
+
+function updateIfExists(list, data) {
+    const idx = findSymbolIndex(list, data.symbol);
+    if (idx !== -1) {
+        list[idx] = { ...list[idx], ...data };
+        return true;
+    }
+    return false;
+}
+
+function existsAnywhere(symbol) {
+    return (
+        findSymbolIndex(list1, symbol) !== -1 ||
+        findSymbolIndex(list2, symbol) !== -1 ||
+        findSymbolIndex(list3, symbol) !== -1
+    );
+}
+
+/* ---------------- incoming tick handling ----------------
+   Rule:
+   - update symbol wherever it already exists
+   - if new symbol, add to storage list3
+*/
+function handleIncomingTick(data) {
+    const updated =
+        updateIfExists(list1, data) ||
+        updateIfExists(list2, data) ||
+        updateIfExists(list3, data);
+
+    if (!updated && !existsAnywhere(data.symbol)) {
+        list3.push({ ...data });
+    }
+}
+
+/* ---------------- pipeline movement ----------------
+   list3 -> list2 -> list1 -> back to list3
+   no duplicates because move removes from source
+*/
+function moveList3ToList2() {
+    if (list2.length >= MAX_LIST2) return;
+    if (list3.length === 0) return;
+
+    const item = list3.shift();
+    list2.push(item);
+}
+
+function moveList2ToList1() {
+    if (list1.length >= MAX_LIST1) return;
+    if (list2.length === 0) return;
+
+    const item = list2.shift();
+    list1.push(item);
+}
+
+function recycleFromList1() {
+    if (list1.length === 0) return;
+
+    const item = list1.shift();
+    list3.push(item);
+}
+
+/* fill visible rows initially */
+function balancePipeline() {
+    while (list2.length < MAX_LIST2 && list3.length > 0) {
+        moveList3ToList2();
+    }
+
+    while (list1.length < MAX_LIST1 && list2.length > 0) {
+        moveList2ToList1();
+    }
+}
+
+/* ---------------- scroll loop ----------------
+   When a full item exits left from list1, recycle it to list3 end.
+   When a full item exits left from list2, move it to list1.
+*/
+function animate() {
+    requestAnimationFrame(animate);
+
+    /* row 1 */
+    if (list1.length > 0 && ticker1.children.length > 0) {
+        pos1 -= SPEED1;
+
+        const first1 = ticker1.children[0];
+        if (first1) {
+            const width1 = first1.offsetWidth + 80; // stock width + margin-right
+            if (-pos1 >= width1) {
+                pos1 += width1;
+                recycleFromList1();
+                balancePipeline();
+                rerenderAll();
+            }
+        }
+
+        const halfWidth1 = ticker1.offsetWidth;
+        if (halfWidth1 > 0 && -pos1 >= halfWidth1) {
+            pos1 = 0;
+        }
+
+        wrapper1.style.transform = `translate3d(${pos1}px,0,0)`;
+    }
+
+    /* row 2 */
+    if (list2.length > 0 && ticker2.children.length > 0) {
+        pos2 -= SPEED2;
+
+        const first2 = ticker2.children[0];
+        if (first2) {
+            const width2 = first2.offsetWidth + 80;
+            if (-pos2 >= width2) {
+                pos2 += width2;
+
+                /* move head of list2 to list1 */
+                moveList2ToList1();
+                balancePipeline();
+                rerenderAll();
+            }
+        }
+
+        const halfWidth2 = ticker2.offsetWidth;
+        if (halfWidth2 > 0 && -pos2 >= halfWidth2) {
+            pos2 = 0;
+        }
+
+        wrapper2.style.transform = `translate3d(${pos2}px,0,0)`;
+    }
+}
+
+/* ---------------- batch flush ---------------- */
+setInterval(() => {
+    const symbols = Object.keys(pendingUpdates);
+    if (symbols.length === 0) return;
+
+    for (const symbol of symbols) {
+        handleIncomingTick(pendingUpdates[symbol]);
+        delete pendingUpdates[symbol];
+    }
+
+    balancePipeline();
+    rerenderAll();
+}, UPDATE_FLUSH_MS);
+
+/* ---------------- initial render loop ---------------- */
+setInterval(() => {
+    balancePipeline();
+    rerenderAll();
+}, 1000);
+
+/* start */
+rerenderAll();
+animate();
+</script>
+
+</body>
+</html>
