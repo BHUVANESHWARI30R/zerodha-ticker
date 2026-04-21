@@ -134,25 +134,57 @@ const ticker1Clone = document.getElementById("ticker1-clone");
 const ticker2 = document.getElementById("ticker2");
 const ticker2Clone = document.getElementById("ticker2-clone");
 
-/* ---------------- state ---------------- */
-let list1 = [];   // visible top row
-let list2 = [];   // visible second row
-let list3 = [];   // storage only
+/* =========================================================
+   QUEUE MODEL
+   Queue1 = visible top row
+   Queue2 = visible second row
+   Queue3 = realtime state store (all stocks, latest data)
+   Queue4 = sorted batch-ready feeder
+========================================================= */
+
+let queue1 = [];
+let queue2 = [];
+let queue4 = [];
+
+/* queue3 is represented as maps for cleaner realtime state */
+const queue3State = new Map();      // symbol -> latest payload
+const queue4Set = new Set();        // tracks symbols currently in queue4
+const queue1Set = new Set();
+const queue2Set = new Set();
 
 const pendingUpdates = {};
 
-const TARGET_LIST2 = 18;
-const TARGET_LIST1 = 18;
+/* tunables */
+const TARGET_Q1 = 12;
+const TARGET_Q2 = 12;
 
 const SPEED1 = 1.8;
 const SPEED2 = 1.8;
 
+/* freshness window for queue4 admission */
+const FRESH_MS = 15000;
+
+/* batch builder timing */
+const QUEUE4_BUILD_MS = 1000;
+const APPLY_UPDATES_MS = 200;
+
 let pos1 = 0;
 let pos2 = 0;
-
 let needsRender = true;
 
-/* ---------------- socket ---------------- */
+/* master sorted symbol order from backend universe */
+const MASTER_SYMBOLS = [
+    "ADANIENT","ADANIPORTS","APOLLOHOSP","ASIANPAINT","AXISBANK","BAJAJ-AUTO",
+    "BAJFINANCE","BAJAJFINSV","BEL","BHARTIARTL","CIPLA","COALINDIA",
+    "DRREDDY","EICHERMOT","GRASIM","HCLTECH","HDFCBANK","HDFCLIFE",
+    "HINDALCO","HINDUNILVR","ICICIBANK","INDUSINDBK","INDIGO","INFY","ITC",
+    "JIOFIN","JSWSTEEL","KOTAKBANK","LT","M&M","MARUTI","MAXHEALTH",
+    "NESTLEIND","NTPC","ONGC","POWERGRID","RELIANCE","SBILIFE","SBIN",
+    "SHRIRAMFIN","SUNPHARMA","TATACONSUM","TATAMOTORS","TATASTEEL","TCS",
+    "TECHM","TITAN","TRENT","ULTRACEMCO","WIPRO"
+].sort();
+
+/* ---------------- socket events ---------------- */
 socket.on("connect", () => {
     console.log("✅ Connected to backend");
 });
@@ -194,64 +226,27 @@ function makeStockHTML(data) {
     `;
 }
 
-function renderList(list, container, cloneContainer) {
-    const html = list.map(makeStockHTML).join("");
+function renderQueue(queue, container, cloneContainer) {
+    const html = queue.map(makeStockHTML).join("");
     container.innerHTML = html;
     cloneContainer.innerHTML = html;
 }
 
 function rerenderAll() {
-    renderList(list1, ticker1, ticker1Clone);
-    renderList(list2, ticker2, ticker2Clone);
+    renderQueue(queue1, ticker1, ticker1Clone);
+    renderQueue(queue2, ticker2, ticker2Clone);
 
-    if (list1.length === 0) {
+    if (queue1.length === 0) {
         pos1 = 0;
         wrapper1.style.transform = "translate3d(0,0,0)";
     }
-    if (list2.length === 0) {
+
+    if (queue2.length === 0) {
         pos2 = 0;
         wrapper2.style.transform = "translate3d(0,0,0)";
     }
 
     needsRender = false;
-}
-
-function findSymbolIndex(list, symbol) {
-    return list.findIndex(item => item.symbol === symbol);
-}
-
-function updateIfExists(list, data) {
-    const idx = findSymbolIndex(list, data.symbol);
-    if (idx !== -1) {
-        list[idx] = { ...list[idx], ...data };
-        needsRender = true;
-        return true;
-    }
-    return false;
-}
-
-function existsAnywhere(symbol) {
-    return (
-        findSymbolIndex(list1, symbol) !== -1 ||
-        findSymbolIndex(list2, symbol) !== -1 ||
-        findSymbolIndex(list3, symbol) !== -1
-    );
-}
-
-function insertSortedIntoList3(data) {
-    list3.push({ ...data });
-    list3.sort((a, b) => a.symbol.localeCompare(b.symbol));
-    needsRender = true;
-}
-
-function removeFromList(list, symbol) {
-    const idx = findSymbolIndex(list, symbol);
-    if (idx !== -1) {
-        const [item] = list.splice(idx, 1);
-        needsRender = true;
-        return item;
-    }
-    return null;
 }
 
 function getFirstItemWidth(tickerEl) {
@@ -262,76 +257,156 @@ function getFirstItemWidth(tickerEl) {
     return first.offsetWidth + parseFloat(style.marginRight || 0);
 }
 
-/* ---------------- incoming data ---------------- */
-function handleIncomingTick(data) {
-    const updated =
-        updateIfExists(list1, data) ||
-        updateIfExists(list2, data) ||
-        updateIfExists(list3, data);
-
-    if (!updated && !existsAnywhere(data.symbol)) {
-        insertSortedIntoList3(data);
-    }
+function isFresh(entry) {
+    if (!entry || !entry.ts) return false;
+    return (Date.now() - entry.ts) <= FRESH_MS;
 }
 
-/* ---------------- filling logic ---------------- */
-function fillList2FromList3() {
-    while (list2.length < TARGET_LIST2 && list3.length > 0) {
-        list2.push(list3.shift());
+function updateQueueItem(queue, symbol, data) {
+    const idx = queue.findIndex(item => item.symbol === symbol);
+    if (idx !== -1) {
+        queue[idx] = { ...queue[idx], ...data };
         needsRender = true;
+        return true;
     }
+    return false;
 }
 
-function fillList1FromList2() {
-    while (list1.length < TARGET_LIST1 && list2.length > 0) {
-        list1.push(list2.shift());
-        needsRender = true;
-    }
-}
-
-function seedRows() {
-    fillList2FromList3();
-    fillList1FromList2();
-}
-
-function topUpAll() {
-    fillList2FromList3();
-    fillList1FromList2();
-}
-
-/* ---------------- handoff logic ----------------
-   Rule:
-   - when first item fully exits List2, move it immediately to end of List1
-   - when first item fully exits List1, move it back into sorted List3
+/* ---------------- queue3 realtime state ----------------
+   Store latest payload + timestamp
 */
-function onList2ItemExited() {
-    if (list2.length === 0) return;
+function applyPendingUpdatesToQueue3() {
+    const symbols = Object.keys(pendingUpdates);
+    if (symbols.length === 0) return;
 
-    const exited = list2.shift();
-    list1.push(exited);
-    needsRender = true;
+    const now = Date.now();
 
-    if (list3.length > 0) {
-        list2.push(list3.shift());
-        needsRender = true;
+    for (const symbol of symbols) {
+        const data = pendingUpdates[symbol];
+
+        const enriched = {
+            ...data,
+            ts: now,
+            ready: true
+        };
+
+        queue3State.set(symbol, enriched);
+
+        /* update anywhere visible immediately if present */
+        updateQueueItem(queue1, symbol, enriched);
+        updateQueueItem(queue2, symbol, enriched);
+
+        /* if already in queue4, keep payload fresh there too */
+        const idx4 = queue4.findIndex(item => item.symbol === symbol);
+        if (idx4 !== -1) {
+            queue4[idx4] = { ...queue4[idx4], ...enriched };
+            needsRender = true;
+        }
+
+        delete pendingUpdates[symbol];
     }
 }
 
-function onList1ItemExited() {
-    if (list1.length === 0) return;
+/* ---------------- queue4 batch builder ----------------
+   Build queue4 from queue3 in sorted order based on freshness.
+   queue4 is not an infinite loop source; it's a prepared feeder.
+*/
+function buildQueue4Batch() {
+    for (const symbol of MASTER_SYMBOLS) {
+        const entry = queue3State.get(symbol);
+        if (!isFresh(entry)) continue;
 
-    const exited = list1.shift();
-    insertSortedIntoList3(exited);
+        const alreadyVisible = queue1Set.has(symbol) || queue2Set.has(symbol);
+        const alreadyQueued = queue4Set.has(symbol);
 
-    if (list2.length > 0) {
-        list1.push(list2.shift());
-        needsRender = true;
-
-        if (list3.length > 0) {
-            list2.push(list3.shift());
+        if (!alreadyVisible && !alreadyQueued) {
+            queue4.push({ ...entry });
+            queue4Set.add(symbol);
             needsRender = true;
         }
     }
+}
+
+/* ---------------- queue membership rebuild ---------------- */
+function rebuildVisibleSets() {
+    queue1Set.clear();
+    queue2Set.clear();
+
+    for (const item of queue1) queue1Set.add(item.symbol);
+    for (const item of queue2) queue2Set.add(item.symbol);
+}
+
+/* ---------------- feed queue2 from queue4 ---------------- */
+function feedQueue2FromQueue4() {
+    while (queue2.length < TARGET_Q2 && queue4.length > 0) {
+        const item = queue4.shift();
+        queue4Set.delete(item.symbol);
+
+        if (!queue2Set.has(item.symbol) && !queue1Set.has(item.symbol)) {
+            queue2.push(item);
+            queue2Set.add(item.symbol);
+            needsRender = true;
+        }
+    }
+}
+
+/* ---------------- feed queue1 from queue2 only initially/if short ---------------- */
+function feedQueue1FromQueue2() {
+    while (queue1.length < TARGET_Q1 && queue2.length > 0) {
+        const item = queue2.shift();
+        queue2Set.delete(item.symbol);
+
+        if (!queue1Set.has(item.symbol)) {
+            queue1.push(item);
+            queue1Set.add(item.symbol);
+            needsRender = true;
+        }
+    }
+}
+
+/* ---------------- movement logic ----------------
+   queue2 exit -> goes immediately to end of queue1
+   queue1 exit -> removed from visible flow
+   it is NOT pushed back directly; queue4 batch builder will re-admit it later
+   if it is still fresh and eligible
+*/
+function onQueue2ItemExited() {
+    if (queue2.length === 0) return;
+
+    const exited = queue2.shift();
+    queue2Set.delete(exited.symbol);
+
+    if (!queue1Set.has(exited.symbol)) {
+        queue1.push(exited);
+        queue1Set.add(exited.symbol);
+        needsRender = true;
+    }
+
+    feedQueue2FromQueue4();
+}
+
+function onQueue1ItemExited() {
+    if (queue1.length === 0) return;
+
+    const exited = queue1.shift();
+    queue1Set.delete(exited.symbol);
+    needsRender = true;
+
+    /* do not instantly loop it back */
+    /* it can be reintroduced later by queue4 batch build if still fresh */
+
+    if (queue2.length > 0) {
+        const moved = queue2.shift();
+        queue2Set.delete(moved.symbol);
+
+        if (!queue1Set.has(moved.symbol)) {
+            queue1.push(moved);
+            queue1Set.add(moved.symbol);
+            needsRender = true;
+        }
+    }
+
+    feedQueue2FromQueue4();
 }
 
 /* ---------------- animation ---------------- */
@@ -342,26 +417,26 @@ function animate() {
         rerenderAll();
     }
 
-    if (list2.length > 0 && ticker2.children.length > 0) {
+    if (queue2.length > 0 && ticker2.children.length > 0) {
         pos2 -= SPEED2;
 
         const width2 = getFirstItemWidth(ticker2);
         if (width2 > 0 && -pos2 >= width2) {
             pos2 += width2;
-            onList2ItemExited();
+            onQueue2ItemExited();
             if (needsRender) rerenderAll();
         }
 
         wrapper2.style.transform = `translate3d(${pos2}px,0,0)`;
     }
 
-    if (list1.length > 0 && ticker1.children.length > 0) {
+    if (queue1.length > 0 && ticker1.children.length > 0) {
         pos1 -= SPEED1;
 
         const width1 = getFirstItemWidth(ticker1);
         if (width1 > 0 && -pos1 >= width1) {
             pos1 += width1;
-            onList1ItemExited();
+            onQueue1ItemExited();
             if (needsRender) rerenderAll();
         }
 
@@ -369,30 +444,28 @@ function animate() {
     }
 }
 
-/* ---------------- apply backend updates ---------------- */
+/* ---------------- schedulers ---------------- */
 setInterval(() => {
-    const symbols = Object.keys(pendingUpdates);
-    if (symbols.length === 0) return;
-
-    for (const symbol of symbols) {
-        handleIncomingTick(pendingUpdates[symbol]);
-        delete pendingUpdates[symbol];
-    }
-
-    topUpAll();
+    applyPendingUpdatesToQueue3();
+    rebuildVisibleSets();
+    feedQueue2FromQueue4();
+    feedQueue1FromQueue2();
 
     if (needsRender) {
         rerenderAll();
     }
-}, 200);
+}, APPLY_UPDATES_MS);
 
-/* ---------------- startup safety ---------------- */
 setInterval(() => {
-    topUpAll();
+    buildQueue4Batch();
+    rebuildVisibleSets();
+    feedQueue2FromQueue4();
+    feedQueue1FromQueue2();
+
     if (needsRender) {
         rerenderAll();
     }
-}, 1500);
+}, QUEUE4_BUILD_MS);
 
 /* ---------------- optional local test data ----------------
 setTimeout(() => {
@@ -414,17 +487,22 @@ setTimeout(() => {
         {symbol:"LT", ltp:3650, change:18, change_percent:0.5}
     ];
 
-    sample.forEach(handleIncomingTick);
-    seedRows();
+    const now = Date.now();
+    sample.forEach(item => {
+        queue3State.set(item.symbol, { ...item, ts: now, ready: true });
+    });
+
+    buildQueue4Batch();
+    rebuildVisibleSets();
+    feedQueue2FromQueue4();
+    feedQueue1FromQueue2();
     rerenderAll();
 }, 1000);
 */
 
 /* ---------------- start ---------------- */
-seedRows();
 rerenderAll();
 animate();
 </script>
-
 </body>
 </html>
