@@ -231,16 +231,27 @@ function renderTicker() {
 
     const html = displayQueue.map(makeStockHTML).join("");
 
-    // duplicate once for seamless loop
-    ticker1.innerHTML = html;
-    ticker1Clone.innerHTML = html;
+    if (screenMode === "1") {
+        ticker1.innerHTML = html;
+        ticker1Clone.innerHTML = html;
+        cycleWidth = ticker1.scrollWidth;
+    }
 
-    ticker2.innerHTML = html;
-    ticker2Clone.innerHTML = html;
+    else if (screenMode === "2") {
+        ticker2.innerHTML = html;
+        ticker2Clone.innerHTML = html;
+        cycleWidth = ticker2.scrollWidth;
+    }
 
-    cycleWidth = ticker1.scrollWidth || ticker2.scrollWidth;
+    else {
+        ticker1.innerHTML = html;
+        ticker1Clone.innerHTML = html;
+        ticker2.innerHTML = html;
+        ticker2Clone.innerHTML = html;
+
+        cycleWidth = ticker1.scrollWidth;
+    }
 }
-
 /* ---------------- ABSOLUTE-TIME SYNC ---------------- */
 function animate() {
     requestAnimationFrame(animate);
@@ -250,15 +261,13 @@ function animate() {
     const now = Date.now() - START_TIME;
     const x = (now * SPEED) % cycleWidth;
 
-    const leftOffset = x;
-    const rightOffset = x + LEFT_SCREEN_WIDTH;
-
-    if (screenMode !== "2") {
-        wrapper1.style.transform = `translate3d(${-leftOffset}px,0,0)`;
-    }
-
-    if (screenMode !== "1") {
-        wrapper2.style.transform = `translate3d(${-rightOffset}px,0,0)`;
+    if (screenMode === "1") {
+        wrapper1.style.transform = `translate3d(${-x}px,0,0)`;
+    } else if (screenMode === "2") {
+        wrapper2.style.transform = `translate3d(${-(x + LEFT_SCREEN_WIDTH)}px,0,0)`;
+    } else {
+        wrapper1.style.transform = `translate3d(${-x}px,0,0)`;
+        wrapper2.style.transform = `translate3d(${-(x + LEFT_SCREEN_WIDTH)}px,0,0)`;
     }
 }
 
