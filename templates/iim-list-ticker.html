@@ -157,13 +157,11 @@ const params = new URLSearchParams(window.location.search);
 const screenMode = params.get("screen") || "both";
 
 if (screenMode === "1") {
-    row2.style.visibility = "hidden";
-    row2.style.position = "absolute";
+    row2.remove();
 }
 
 if (screenMode === "2") {
-    row1.style.visibility = "hidden";
-    row1.style.position = "absolute";
+    row1.remove();
 }
 
 /* ---------------- CONSTANTS ---------------- */
