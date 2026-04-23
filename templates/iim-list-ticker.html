@@ -132,7 +132,7 @@ body {
 </div>
 
 <script>
-console.log("SYNCED SMOOTH TICKER LOADED");
+console.log("LOOP-SWAP TICKER LOADED");
 
 const socket = io();
 
@@ -157,26 +157,30 @@ const params = new URLSearchParams(window.location.search);
 const screenMode = params.get("screen") || "both";
 
 if (screenMode === "1") {
-    row2.style.visibility = "hidden";
-    row2.style.position = "absolute";
+    row2.remove();
 }
 
 if (screenMode === "2") {
-    row1.style.visibility = "hidden";
-    row1.style.position = "absolute";
+    row1.remove();
 }
 
 /* ---------------- CONSTANTS ---------------- */
 const LEFT_SCREEN_WIDTH = 2176;
-const SPEED = 0.08;              // smooth synced speed
-const START_TIME = 1700000000000; // fixed absolute reference
+const SPEED = 0.012;               // recommended readable speed
+const START_TIME = 1700000000000;  // fixed absolute reference
 const UPDATE_INTERVAL_MS = 300;
 
-/* ---------------- DATA ---------------- */
+/* ---------------- DATA ----------------
+   displayQueue = currently visible stable loop
+   nextQueue    = queue4 / pending next loop data
+*/
 let displayQueue = [];
+let nextQueue = [];
 const pendingUpdates = {};
 const queue3State = new Map();
+
 let cycleWidth = 0;
+let lastX = 0;
 
 /* ---------------- SOCKET ---------------- */
 socket.on("connect", () => {
@@ -221,29 +225,48 @@ function makeStockHTML(data) {
 }
 
 /* ---------------- RENDER ---------------- */
-function renderTicker() {
-    if (!displayQueue.length) {
-        ticker1.innerHTML = "";
-        ticker1Clone.innerHTML = "";
-        ticker2.innerHTML = "";
-        ticker2Clone.innerHTML = "";
-        cycleWidth = 0;
+function clearTicker() {
+    ticker1.innerHTML = "";
+    ticker1Clone.innerHTML = "";
+    ticker2.innerHTML = "";
+    ticker2Clone.innerHTML = "";
+    cycleWidth = 0;
+}
+
+function renderTickerFrom(queue) {
+    if (!queue.length) {
+        clearTicker();
         return;
     }
 
-    const html = displayQueue.map(makeStockHTML).join("");
+    const html = queue.map(makeStockHTML).join("");
 
-    // duplicate once for seamless loop
+    if (screenMode === "1") {
+        ticker1.innerHTML = html;
+        ticker1Clone.innerHTML = html;
+        cycleWidth = ticker1.scrollWidth;
+        return;
+    }
+
+    if (screenMode === "2") {
+        ticker2.innerHTML = html;
+        ticker2Clone.innerHTML = html;
+        cycleWidth = ticker2.scrollWidth;
+        return;
+    }
+
     ticker1.innerHTML = html;
     ticker1Clone.innerHTML = html;
-
     ticker2.innerHTML = html;
     ticker2Clone.innerHTML = html;
 
-    cycleWidth = ticker1.scrollWidth || ticker2.scrollWidth;
+    cycleWidth = ticker1.scrollWidth;
 }
 
-/* ---------------- ABSOLUTE-TIME SYNC ---------------- */
+/* ---------------- ABSOLUTE-TIME LOOPED SYNC ----------------
+   We do NOT update the visible ticker mid-loop.
+   We only swap displayQueue = nextQueue when a full loop completes.
+*/
 function animate() {
     requestAnimationFrame(animate);
 
@@ -252,19 +275,35 @@ function animate() {
     const now = Date.now() - START_TIME;
     const x = (now * SPEED) % cycleWidth;
 
-    const leftOffset = x;
-    const rightOffset = x + LEFT_SCREEN_WIDTH;
-
-    if (screenMode !== "2") {
-        wrapper1.style.transform = `translate3d(${-leftOffset}px,0,0)`;
+    /* loop boundary detected */
+    if (x < lastX) {
+        if (nextQueue.length > 0 && JSON.stringify(nextQueue) !== JSON.stringify(displayQueue)) {
+            displayQueue = nextQueue.map(item => ({ ...item }));
+            renderTickerFrom(displayQueue);
+        }
     }
 
-    if (screenMode !== "1") {
-        wrapper2.style.transform = `translate3d(${-rightOffset}px,0,0)`;
+    lastX = x;
+
+    if (screenMode === "1") {
+        wrapper1.style.transform = `translate3d(${-x}px,0,0)`;
+        return;
     }
+
+    if (screenMode === "2") {
+        wrapper2.style.transform = `translate3d(${-(x + LEFT_SCREEN_WIDTH)}px,0,0)`;
+        return;
+    }
+
+    wrapper1.style.transform = `translate3d(${-x}px,0,0)`;
+    wrapper2.style.transform = `translate3d(${-(x + LEFT_SCREEN_WIDTH)}px,0,0)`;
 }
 
-/* ---------------- UPDATE QUEUE ---------------- */
+/* ---------------- UPDATE QUEUE ----------------
+   Updates go into queue3State immediately.
+   nextQueue is rebuilt immediately.
+   But visible displayQueue changes ONLY at loop boundary.
+*/
 setInterval(() => {
     const symbols = Object.keys(pendingUpdates);
     if (!symbols.length) return;
@@ -273,27 +312,35 @@ setInterval(() => {
 
     for (const symbol of symbols) {
         const data = pendingUpdates[symbol];
+
         queue3State.set(symbol, {
             ...data,
             ts: now
         });
+
         delete pendingUpdates[symbol];
     }
 
-    const nextQueue = [];
+    const rebuilt = [];
     for (const [, data] of queue3State) {
-        nextQueue.push(data);
+        rebuilt.push(data);
     }
 
-    nextQueue.sort((a, b) => a.symbol.localeCompare(b.symbol));
-    displayQueue = nextQueue;
+    rebuilt.sort((a, b) => a.symbol.localeCompare(b.symbol));
+    nextQueue = rebuilt;
 
-    renderTicker();
+    /* first-time initialization */
+    if (displayQueue.length === 0 && nextQueue.length > 0) {
+        displayQueue = nextQueue.map(item => ({ ...item }));
+        renderTickerFrom(displayQueue);
+    }
 }, UPDATE_INTERVAL_MS);
+
+/* ---------------- OPTIONAL TEST DATA ---------------- */
 
 
 /* ---------------- START ---------------- */
-renderTicker();
+renderTickerFrom(displayQueue);
 animate();
 </script>
 
