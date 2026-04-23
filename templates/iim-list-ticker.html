@@ -263,14 +263,17 @@ function animate() {
 
     if (screenMode === "1") {
         wrapper1.style.transform = `translate3d(${-x}px,0,0)`;
-    } else if (screenMode === "2") {
+    }
+
+    else if (screenMode === "2") {
         wrapper2.style.transform = `translate3d(${-(x + LEFT_SCREEN_WIDTH)}px,0,0)`;
-    } else {
+    }
+
+    else {
         wrapper1.style.transform = `translate3d(${-x}px,0,0)`;
         wrapper2.style.transform = `translate3d(${-(x + LEFT_SCREEN_WIDTH)}px,0,0)`;
     }
 }
-
 /* ---------------- UPDATE QUEUE ---------------- */
 setInterval(() => {
     const symbols = Object.keys(pendingUpdates);
