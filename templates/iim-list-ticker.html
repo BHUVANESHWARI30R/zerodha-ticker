@@ -115,7 +115,7 @@ body {
 
 <body>
 
-<div class="page">
+<div class="page" id="page">
     <div class="ticker-row list1-row" id="row1">
         <div class="ticker-wrapper" id="wrapper1">
             <div class="ticker" id="ticker1"></div>
@@ -132,9 +132,12 @@ body {
 </div>
 
 <script>
-console.log("SYNCED SMOOTH TICKER LOADED");
+console.log("ROBUST SYNC TICKER LOADED");
 
 const socket = io();
+
+const row1 = document.getElementById("row1");
+const row2 = document.getElementById("row2");
 
 const wrapper1 = document.getElementById("wrapper1");
 const wrapper2 = document.getElementById("wrapper2");
@@ -145,29 +148,18 @@ const ticker1Clone = document.getElementById("ticker1-clone");
 const ticker2 = document.getElementById("ticker2");
 const ticker2Clone = document.getElementById("ticker2-clone");
 
-const row1 = document.getElementById("row1");
-const row2 = document.getElementById("row2");
-
 /* ---------------- URL MODE ----------------
-   ?screen=1  -> only row1
-   ?screen=2  -> only row2
-   no param   -> both rows (browser preview)
+   ?screen=1  -> render only LEFT row
+   ?screen=2  -> render only RIGHT row
+   no param   -> render both (browser preview)
 */
 const params = new URLSearchParams(window.location.search);
 const screenMode = params.get("screen") || "both";
 
-if (screenMode === "1") {
-    row2.remove();
-}
-
-if (screenMode === "2") {
-    row1.remove();
-}
-
 /* ---------------- CONSTANTS ---------------- */
 const LEFT_SCREEN_WIDTH = 2176;
-const SPEED = 0.012;              // smooth synced speed
-const START_TIME = 1700000000000; // fixed absolute reference
+const SPEED = 0.012;
+const START_TIME = 1700000000000;
 const UPDATE_INTERVAL_MS = 300;
 
 /* ---------------- DATA ---------------- */
@@ -175,6 +167,28 @@ let displayQueue = [];
 const pendingUpdates = {};
 const queue3State = new Map();
 let cycleWidth = 0;
+
+/* ---------------- ACTIVE TARGETS ---------------- */
+let activeWrapper = null;
+let activeTicker = null;
+let activeTickerClone = null;
+let offsetBase = 0;
+
+if (screenMode === "1") {
+    row2.remove();
+    activeWrapper = wrapper1;
+    activeTicker = ticker1;
+    activeTickerClone = ticker1Clone;
+    offsetBase = 0;
+} else if (screenMode === "2") {
+    row1.remove();
+    activeWrapper = wrapper2;
+    activeTicker = ticker2;
+    activeTickerClone = ticker2Clone;
+    offsetBase = LEFT_SCREEN_WIDTH;
+} else {
+    activeWrapper = null; // both mode uses both wrappers
+}
 
 /* ---------------- SOCKET ---------------- */
 socket.on("connect", () => {
@@ -207,7 +221,7 @@ function makeStockHTML(data) {
                 </div>
 
                 <div class="change-arrow ${colorClass}" style="flex-direction: column; align-items: flex-end;">
-                    <div>(${data.change_percent}%)</div>
+                    <div>(${data.change_percent})</div>
                     <div>
                         <span class="arrow">${arrow}</span>
                         <span>${formatSignedNumber(data.change)}</span>
@@ -219,40 +233,36 @@ function makeStockHTML(data) {
 }
 
 /* ---------------- RENDER ---------------- */
+function clearAll() {
+    ticker1.innerHTML = "";
+    ticker1Clone.innerHTML = "";
+    ticker2.innerHTML = "";
+    ticker2Clone.innerHTML = "";
+    cycleWidth = 0;
+}
+
 function renderTicker() {
     if (!displayQueue.length) {
-        ticker1.innerHTML = "";
-        ticker1Clone.innerHTML = "";
-        ticker2.innerHTML = "";
-        ticker2Clone.innerHTML = "";
-        cycleWidth = 0;
+        clearAll();
         return;
     }
 
     const html = displayQueue.map(makeStockHTML).join("");
 
-    if (screenMode === "1") {
-        ticker1.innerHTML = html;
-        ticker1Clone.innerHTML = html;
-        cycleWidth = ticker1.scrollWidth;
-    }
-
-    else if (screenMode === "2") {
-        ticker2.innerHTML = html;
-        ticker2Clone.innerHTML = html;
-        cycleWidth = ticker2.scrollWidth;
-    }
-
-    else {
+    if (screenMode === "1" || screenMode === "2") {
+        activeTicker.innerHTML = html;
+        activeTickerClone.innerHTML = html;
+        cycleWidth = activeTicker.scrollWidth;
+    } else {
         ticker1.innerHTML = html;
         ticker1Clone.innerHTML = html;
         ticker2.innerHTML = html;
         ticker2Clone.innerHTML = html;
-
         cycleWidth = ticker1.scrollWidth;
     }
 }
-/* ---------------- ABSOLUTE-TIME SYNC ---------------- */
+
+/* ---------------- SYNC ANIMATION ---------------- */
 function animate() {
     requestAnimationFrame(animate);
 
@@ -261,19 +271,14 @@ function animate() {
     const now = Date.now() - START_TIME;
     const x = (now * SPEED) % cycleWidth;
 
-    if (screenMode === "1") {
-        wrapper1.style.transform = `translate3d(${-x}px,0,0)`;
-    }
-
-    else if (screenMode === "2") {
-        wrapper2.style.transform = `translate3d(${-(x + LEFT_SCREEN_WIDTH)}px,0,0)`;
-    }
-
-    else {
+    if (screenMode === "1" || screenMode === "2") {
+        activeWrapper.style.transform = `translate3d(${-(x + offsetBase)}px,0,0)`;
+    } else {
         wrapper1.style.transform = `translate3d(${-x}px,0,0)`;
         wrapper2.style.transform = `translate3d(${-(x + LEFT_SCREEN_WIDTH)}px,0,0)`;
     }
 }
+
 /* ---------------- UPDATE QUEUE ---------------- */
 setInterval(() => {
     const symbols = Object.keys(pendingUpdates);
@@ -300,6 +305,8 @@ setInterval(() => {
 
     renderTicker();
 }, UPDATE_INTERVAL_MS);
+
+/* ---------------- OPTIONAL TEST DATA ---------------- */
 
 
 /* ---------------- START ---------------- */
