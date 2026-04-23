@@ -16,43 +16,96 @@ html, body {
     overflow: hidden;
 }
 
+body {
+    line-height: 1;
+}
+
+.page {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    background: #000;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0;
+}
+
 .ticker-row {
     overflow: hidden;
     display: flex;
     align-items: center;
     background: #000;
+    position: relative;
+    margin: 0;
+    padding: 0;
 }
 
-.list1-row { width: 2176px; height: 128px; }
-.list2-row { width: 2048px; height: 128px; }
+.list1-row {
+    width: 2176px;   /* LEFT SCREEN */
+    height: 128px;
+}
+
+.list2-row {
+    width: 2048px;   /* RIGHT SCREEN */
+    height: 128px;
+    border-top: none;
+}
 
 .ticker-wrapper {
     display: flex;
     width: max-content;
     will-change: transform;
-    transform: translate3d(0,0,0);
+    transform: translate3d(0, 0, 0);
+    backface-visibility: hidden;
+    margin: 0;
+    padding: 0;
 }
 
 .ticker {
     display: flex;
+    align-items: center;
     white-space: nowrap;
+    width: max-content;
+    flex-shrink: 0;
+    margin: 0;
+    padding: 0;
 }
 
 .stock {
     display: flex;
     align-items: center;
+    justify-content: space-between;
     margin-right: 80px;
     min-width: 260px;
+    flex-shrink: 0;
+}
+
+.stock-text {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    width: 100%;
+    gap: 28px;
 }
 
 .symbol-ltp {
     font-weight: bold;
     font-size: 55px;
+    line-height: 1.10;
+    white-space: nowrap;
 }
 
 .change-arrow {
     font-size: 55px;
     font-weight: bold;
+    display: flex;
+    align-items: center;
+    line-height: 1.10;
+}
+
+.arrow {
+    margin-right: 2px;
 }
 
 .up { color: lime; }
@@ -62,133 +115,239 @@ html, body {
 
 <body>
 
-<div class="ticker-row list1-row">
-    <div class="ticker-wrapper" id="wrapper1">
-        <div class="ticker" id="ticker1"></div>
+<div class="page">
+    <div class="ticker-row list1-row" id="row1">
+        <div class="ticker-wrapper" id="wrapper1">
+            <div class="ticker" id="ticker1"></div>
+            <div class="ticker" id="ticker1-clone"></div>
+        </div>
     </div>
-</div>
 
-<div class="ticker-row list2-row">
-    <div class="ticker-wrapper" id="wrapper2">
-        <div class="ticker" id="ticker2"></div>
+    <div class="ticker-row list2-row" id="row2">
+        <div class="ticker-wrapper" id="wrapper2">
+            <div class="ticker" id="ticker2"></div>
+            <div class="ticker" id="ticker2-clone"></div>
+        </div>
     </div>
 </div>
 
 <script>
+console.log("LOOP-SWAP TICKER LOADED");
+
 const socket = io();
 
 const wrapper1 = document.getElementById("wrapper1");
 const wrapper2 = document.getElementById("wrapper2");
 
 const ticker1 = document.getElementById("ticker1");
+const ticker1Clone = document.getElementById("ticker1-clone");
+
 const ticker2 = document.getElementById("ticker2");
+const ticker2Clone = document.getElementById("ticker2-clone");
 
+const row1 = document.getElementById("row1");
+const row2 = document.getElementById("row2");
+
+/* ---------------- URL MODE ----------------
+   ?screen=1  -> only row1
+   ?screen=2  -> only row2
+   no param   -> both rows (browser preview)
+*/
+const params = new URLSearchParams(window.location.search);
+const screenMode = params.get("screen") || "both";
+
+if (screenMode === "1") {
+    row2.remove();
+}
+
+if (screenMode === "2") {
+    row1.remove();
+}
+
+/* ---------------- CONSTANTS ---------------- */
 const LEFT_SCREEN_WIDTH = 2176;
-const SPEED = 0.012;
-
-/* 🔥 FIXED GLOBAL TIME */
+const SPEED = 0.08;               // recommended readable speed
 let START_TIME = localStorage.getItem("ticker_start_time");
+
 if (!START_TIME) {
     START_TIME = Date.now();
     localStorage.setItem("ticker_start_time", START_TIME);
 } else {
     START_TIME = parseInt(START_TIME);
 }
+const UPDATE_INTERVAL_MS = 300;
 
-/* ---------------- DATA ---------------- */
+/* ---------------- DATA ----------------
+   displayQueue = currently visible stable loop
+   nextQueue    = queue4 / pending next loop data
+*/
 let displayQueue = [];
+let nextQueue = [];
 const pendingUpdates = {};
-const queueMap = new Map();
+const queue3State = new Map();
+
+let cycleWidth = 0;
+let lastX = 0;
 
 /* ---------------- SOCKET ---------------- */
+socket.on("connect", () => {
+    console.log("✅ Connected to backend");
+});
+
+socket.on("connect_error", (err) => {
+    console.error("❌ connect_error:", err);
+});
+
 socket.on("stock_update", (data) => {
     pendingUpdates[data.symbol] = data;
 });
 
-/* ---------------- CREATE STOCK ---------------- */
-function createStockNode(data) {
-    const div = document.createElement("div");
-    div.className = "stock";
-    div.dataset.symbol = data.symbol;
+/* ---------------- UI ---------------- */
+function formatSignedNumber(value) {
+    return value >= 0 ? `+${value}` : `${value}`;
+}
 
-    div.innerHTML = `
-        <div>
-            <div class="symbol-ltp ${data.change < 0 ? "down" : "up"}">${data.symbol}</div>
-            <div class="symbol-ltp">${data.ltp}</div>
-        </div>
-        <div class="change-arrow ${data.change < 0 ? "down" : "up"}">
-            (${data.change_percent}%)
+function makeStockHTML(data) {
+    const colorClass = data.change < 0 ? "down" : "up";
+    const arrow = data.change >= 0 ? "▲" : "▼";
+
+    return `
+        <div class="stock" data-symbol="${data.symbol}">
+            <div class="stock-text">
+                <div>
+                    <div class="symbol-ltp ${colorClass}">${data.symbol}</div>
+                    <div class="symbol-ltp ${colorClass}">${data.ltp}</div>
+                </div>
+
+                <div class="change-arrow ${colorClass}" style="flex-direction: column; align-items: flex-end;">
+                    <div>(${data.change_percent}%)</div>
+                    <div>
+                        <span class="arrow">${arrow}</span>
+                        <span>${formatSignedNumber(data.change)}</span>
+                    </div>
+                </div>
+            </div>
         </div>
     `;
-    return div;
 }
 
-/* ---------------- INITIAL RENDER ---------------- */
-function initialRender(queue) {
+/* ---------------- RENDER ---------------- */
+function clearTicker() {
     ticker1.innerHTML = "";
+    ticker1Clone.innerHTML = "";
     ticker2.innerHTML = "";
-
-    queue.forEach(item => {
-        const node1 = createStockNode(item);
-        const node2 = createStockNode(item);
-
-        ticker1.appendChild(node1);
-        ticker2.appendChild(node2);
-    });
-
-    /* duplicate for loop */
-    ticker1.innerHTML += ticker1.innerHTML;
-    ticker2.innerHTML += ticker2.innerHTML;
+    ticker2Clone.innerHTML = "";
+    cycleWidth = 0;
 }
 
-/* ---------------- PATCH ONLY VALUES ---------------- */
-function patchTicker(dataList) {
-    dataList.forEach(data => {
-        const nodes = document.querySelectorAll(`[data-symbol="${data.symbol}"]`);
-
-        nodes.forEach(node => {
-            const ltp = node.children[0].children[1];
-            const arrow = node.children[1];
-
-            if (ltp) ltp.textContent = data.ltp;
-            if (arrow) arrow.textContent = `(${data.change_percent}%)`;
-        });
-    });
-}
-
-/* ---------------- UPDATE LOOP ---------------- */
-setInterval(() => {
-    const keys = Object.keys(pendingUpdates);
-    if (!keys.length) return;
-
-    keys.forEach(symbol => {
-        queueMap.set(symbol, pendingUpdates[symbol]);
-        delete pendingUpdates[symbol];
-    });
-
-    const updated = Array.from(queueMap.values());
-    updated.sort((a, b) => a.symbol.localeCompare(b.symbol));
-
-    if (displayQueue.length === 0) {
-        displayQueue = updated;
-        initialRender(displayQueue);
-    } else {
-        patchTicker(updated); // 🔥 no rebuild
+function renderTickerFrom(queue) {
+    if (!queue.length) {
+        clearTicker();
+        return;
     }
 
-}, 300);
+    const html = queue.map(makeStockHTML).join("");
 
-/* ---------------- SMOOTH SCROLL ---------------- */
+    if (screenMode === "1") {
+        ticker1.innerHTML = html;
+        ticker1Clone.innerHTML = html;
+        cycleWidth = ticker1.scrollWidth;
+        return;
+    }
+
+    if (screenMode === "2") {
+        ticker2.innerHTML = html;
+        ticker2Clone.innerHTML = html;
+        cycleWidth = ticker2.scrollWidth;
+        return;
+    }
+
+    ticker1.innerHTML = html;
+    ticker1Clone.innerHTML = html;
+    ticker2.innerHTML = html;
+    ticker2Clone.innerHTML = html;
+
+    cycleWidth = ticker1.scrollWidth;
+}
+
+/* ---------------- ABSOLUTE-TIME LOOPED SYNC ----------------
+   We do NOT update the visible ticker mid-loop.
+   We only swap displayQueue = nextQueue when a full loop completes.
+*/
 function animate() {
     requestAnimationFrame(animate);
 
+    if (!cycleWidth) return;
+
     const now = Date.now() - START_TIME;
-    const x = now * SPEED;
+    const x = (now * SPEED) % cycleWidth;
+
+    /* loop boundary detected */
+    if (x < lastX) {
+        if (nextQueue.length > 0 && JSON.stringify(nextQueue) !== JSON.stringify(displayQueue)) {
+            displayQueue = nextQueue.map(item => ({ ...item }));
+            renderTickerFrom(displayQueue);
+        }
+    }
+
+    lastX = x;
+
+    if (screenMode === "1") {
+        wrapper1.style.transform = `translate3d(${-x}px,0,0)`;
+        return;
+    }
+
+    if (screenMode === "2") {
+        wrapper2.style.transform = `translate3d(${-(x + LEFT_SCREEN_WIDTH)}px,0,0)`;
+        return;
+    }
 
     wrapper1.style.transform = `translate3d(${-x}px,0,0)`;
     wrapper2.style.transform = `translate3d(${-(x + LEFT_SCREEN_WIDTH)}px,0,0)`;
 }
 
+/* ---------------- UPDATE QUEUE ----------------
+   Updates go into queue3State immediately.
+   nextQueue is rebuilt immediately.
+   But visible displayQueue changes ONLY at loop boundary.
+*/
+setInterval(() => {
+    const symbols = Object.keys(pendingUpdates);
+    if (!symbols.length) return;
+
+    const now = Date.now();
+
+    for (const symbol of symbols) {
+        const data = pendingUpdates[symbol];
+
+        queue3State.set(symbol, {
+            ...data,
+            ts: now
+        });
+
+        delete pendingUpdates[symbol];
+    }
+
+    const rebuilt = [];
+    for (const [, data] of queue3State) {
+        rebuilt.push(data);
+    }
+
+    rebuilt.sort((a, b) => a.symbol.localeCompare(b.symbol));
+    nextQueue = rebuilt;
+
+    /* first-time initialization */
+    if (displayQueue.length === 0 && nextQueue.length > 0) {
+        displayQueue = nextQueue.map(item => ({ ...item }));
+        renderTickerFrom(displayQueue);
+    }
+}, UPDATE_INTERVAL_MS);
+
+/* ---------------- OPTIONAL TEST DATA ---------------- */
+
+
+/* ---------------- START ---------------- */
+renderTickerFrom(displayQueue);
 animate();
 </script>
 
