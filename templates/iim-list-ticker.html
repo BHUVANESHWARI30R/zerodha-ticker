@@ -167,8 +167,14 @@ if (screenMode === "2") {
 /* ---------------- CONSTANTS ---------------- */
 const LEFT_SCREEN_WIDTH = 2176;
 const SPEED = 0.08;               // recommended readable speed
+let START_TIME = localStorage.getItem("ticker_start_time");
 
-const START_TIME = 1700000000000;
+if (!START_TIME) {
+    START_TIME = Date.now();
+    localStorage.setItem("ticker_start_time", START_TIME);
+} else {
+    START_TIME = parseInt(START_TIME);
+}
 const UPDATE_INTERVAL_MS = 300;
 
 /* ---------------- DATA ----------------
