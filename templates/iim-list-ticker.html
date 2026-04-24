@@ -16,9 +16,7 @@ html, body {
     overflow: hidden;
 }
 
-body {
-    line-height: 1;
-}
+body { line-height: 1; }
 
 .page {
     margin: 0;
@@ -42,12 +40,12 @@ body {
 }
 
 .list1-row {
-    width: 2176px;   /* LEFT SCREEN */
+    width: 2176px;
     height: 128px;
 }
 
 .list2-row {
-    width: 2048px;   /* RIGHT SCREEN */
+    width: 2048px;
     height: 128px;
     border-top: none;
 }
@@ -104,9 +102,7 @@ body {
     line-height: 1.10;
 }
 
-.arrow {
-    margin-right: 2px;
-}
+.arrow { margin-right: 2px; }
 
 .up { color: lime; }
 .down { color: red; }
@@ -132,11 +128,10 @@ body {
 </div>
 
 <script>
-console.log("FINAL SYNC TICKER LOADED");
+console.log("FINAL OPTION 3 TICKER LOADED");
 
 const socket = io();
 
-/* ---------------- DOM ---------------- */
 const wrapper1 = document.getElementById("wrapper1");
 const wrapper2 = document.getElementById("wrapper2");
 
@@ -149,7 +144,11 @@ const ticker2Clone = document.getElementById("ticker2-clone");
 const row1 = document.getElementById("row1");
 const row2 = document.getElementById("row2");
 
-/* ---------------- SCREEN MODE ---------------- */
+/* ---------------- SCREEN MODE ----------------
+   ?screen=1  -> only row1
+   ?screen=2  -> only row2
+   no param   -> both rows
+*/
 const params = new URLSearchParams(window.location.search);
 const screenMode = params.get("screen") || "both";
 
@@ -160,10 +159,14 @@ if (screenMode === "2") row1.remove();
 const LEFT_SCREEN_WIDTH = 2176;
 const SPEED = 0.03;
 const START_TIME = 1700000000000;
-const UPDATE_INTERVAL_MS = 200;
+const MIN_INITIAL_STOCKS = 10;
 
-/* ---------------- DATA ---------------- */
-const set4Map = new Map();   // master latest state
+/* ---------------- DATA MODEL ----------------
+   set4Map = realtime latest state, no duplicates
+   displayQueue = currently visible frozen ticker
+   nextQueue = latest prepared batch waiting for next loop
+*/
+const set4Map = new Map();
 
 let displayQueue = [];
 let nextQueue = [];
@@ -173,25 +176,53 @@ let lastX = 0;
 let firstRenderDone = false;
 
 /* ---------------- SOCKET ---------------- */
+socket.on("connect", () => {
+    console.log("✅ Connected to backend");
+});
 
-// 🔥 FULL SNAPSHOT (VERY IMPORTANT)
+socket.on("connect_error", (err) => {
+    console.error("❌ connect_error:", err);
+});
+
+/* Option 3: works if backend sends full snapshot */
 socket.on("ticker_snapshot", (data) => {
     console.log("📦 Snapshot received");
 
     set4Map.clear();
 
     data.forEach(item => {
-        set4Map.set(item.symbol, item);
+        if (item && item.symbol) {
+            set4Map.set(item.symbol, item);
+        }
     });
 
-    loadNextBatch();   // same start for all screens
+    loadNextBatch();
     firstRenderDone = true;
 });
 
-// realtime updates
+/* Option 3: also works if backend only sends realtime stock_update */
 socket.on("stock_update", (data) => {
-    set4Map.set(data.symbol, data); // ONLY update Set 4
+    if (!data || !data.symbol) return;
+
+    set4Map.set(data.symbol, data);
+
+    nextQueue = buildSortedSet4();
+
+    if (!firstRenderDone && set4Map.size >= MIN_INITIAL_STOCKS) {
+        console.log("⚡ Initial render from realtime updates");
+        loadNextBatch();
+        firstRenderDone = true;
+    }
 });
+
+/* Final fallback if snapshot is not available and updates are slow */
+setTimeout(() => {
+    if (!firstRenderDone && set4Map.size > 0) {
+        console.log("⏳ Fallback initial render");
+        loadNextBatch();
+        firstRenderDone = true;
+    }
+}, 1500);
 
 /* ---------------- UI ---------------- */
 function formatSignedNumber(v) {
@@ -203,35 +234,62 @@ function makeStockHTML(d) {
     const arrow = d.change >= 0 ? "▲" : "▼";
 
     return `
-    <div class="stock">
-        <div class="stock-text">
-            <div>
-                <div class="symbol-ltp ${color}">${d.symbol}</div>
-                <div class="symbol-ltp ${color}">${d.ltp}</div>
-            </div>
-
-            <div class="change-arrow ${color}" style="flex-direction: column; align-items: flex-end;">
-                <div>(${d.change_percent}%)</div>
+        <div class="stock" data-symbol="${d.symbol}">
+            <div class="stock-text">
                 <div>
-                    <span class="arrow">${arrow}</span>
-                    <span>${formatSignedNumber(d.change)}</span>
+                    <div class="symbol-ltp ${color}">${d.symbol}</div>
+                    <div class="symbol-ltp ${color}">${d.ltp}</div>
+                </div>
+
+                <div class="change-arrow ${color}" style="flex-direction: column; align-items: flex-end;">
+                    <div>(${d.change_percent}%)</div>
+                    <div>
+                        <span class="arrow">${arrow}</span>
+                        <span>${formatSignedNumber(d.change)}</span>
+                    </div>
                 </div>
             </div>
         </div>
-    </div>`;
+    `;
 }
 
-/* ---------------- BUILD BATCH ---------------- */
+/* ---------------- BUILD SET 4 BATCH ---------------- */
 function buildSortedSet4() {
     return Array.from(set4Map.values())
-        .sort((a, b) => a.symbol.localeCompare(b.symbol));
+        .sort((a, b) => a.symbol.localeCompare(b.symbol))
+        .map(item => ({ ...item }));
 }
 
 /* ---------------- RENDER ---------------- */
+function clearTicker() {
+    if (ticker1) ticker1.innerHTML = "";
+    if (ticker1Clone) ticker1Clone.innerHTML = "";
+    if (ticker2) ticker2.innerHTML = "";
+    if (ticker2Clone) ticker2Clone.innerHTML = "";
+    cycleWidth = 0;
+}
+
 function renderTicker(queue) {
-    if (!queue.length) return;
+    if (!queue.length) {
+        clearTicker();
+        return;
+    }
 
     const html = queue.map(makeStockHTML).join("");
+
+    if (screenMode === "1") {
+        ticker1.innerHTML = html;
+        ticker1Clone.innerHTML = html;
+        cycleWidth = ticker1.scrollWidth;
+        return;
+    }
+
+    if (screenMode === "2") {
+        ticker2.innerHTML = html;
+        ticker2Clone.innerHTML = html;
+        cycleWidth = ticker2.scrollWidth;
+        return;
+    }
 
     ticker1.innerHTML = html;
     ticker1Clone.innerHTML = html;
@@ -247,9 +305,9 @@ function loadNextBatch() {
     const batch = buildSortedSet4();
     if (!batch.length) return;
 
-    nextQueue = batch.map(i => ({ ...i }));
+    nextQueue = batch.map(item => ({ ...item }));
+    displayQueue = nextQueue.map(item => ({ ...item }));
 
-    displayQueue = nextQueue;
     renderTicker(displayQueue);
 }
 
@@ -262,22 +320,36 @@ function animate() {
     const now = Date.now() - START_TIME;
     const x = (now * SPEED) % cycleWidth;
 
-    // 🔥 LOOP COMPLETE
+    /*
+      Full loop completed.
+      Re-render only here, never on incoming realtime updates.
+    */
     if (x < lastX) {
-        loadNextBatch(); // update ONLY here
+        if (nextQueue.length > 0) {
+            const latest = buildSortedSet4();
+            nextQueue = latest;
+
+            const oldSignature = displayQueue.map(x => `${x.symbol}:${x.ltp}:${x.change}:${x.change_percent}`).join("|");
+            const newSignature = nextQueue.map(x => `${x.symbol}:${x.ltp}:${x.change}:${x.change_percent}`).join("|");
+
+            if (oldSignature !== newSignature) {
+                displayQueue = nextQueue.map(item => ({ ...item }));
+                renderTicker(displayQueue);
+            }
+        }
     }
 
     lastX = x;
 
-    const left = x;
-    const right = x + LEFT_SCREEN_WIDTH;
+    const leftOffset = x;
+    const rightOffset = x + LEFT_SCREEN_WIDTH;
 
     if (screenMode !== "2") {
-        wrapper1.style.transform = `translate3d(${-left}px,0,0)`;
+        wrapper1.style.transform = `translate3d(${-leftOffset}px,0,0)`;
     }
 
     if (screenMode !== "1") {
-        wrapper2.style.transform = `translate3d(${-right}px,0,0)`;
+        wrapper2.style.transform = `translate3d(${-rightOffset}px,0,0)`;
     }
 }
 
@@ -286,3 +358,4 @@ animate();
 </script>
 
 </body>
+</html>
