@@ -128,7 +128,7 @@ body { line-height: 1; }
 </div>
 
 <script>
-console.log("FINAL OPTION 3 TICKER LOADED");
+console.log("FINAL SNAPSHOT SYNC TICKER LOADED");
 
 const socket = io();
 
@@ -144,11 +144,7 @@ const ticker2Clone = document.getElementById("ticker2-clone");
 const row1 = document.getElementById("row1");
 const row2 = document.getElementById("row2");
 
-/* ---------------- SCREEN MODE ----------------
-   ?screen=1  -> only row1
-   ?screen=2  -> only row2
-   no param   -> both rows
-*/
+/* ---------------- SCREEN MODE ---------------- */
 const params = new URLSearchParams(window.location.search);
 const screenMode = params.get("screen") || "both";
 
@@ -157,14 +153,16 @@ if (screenMode === "2") row1.remove();
 
 /* ---------------- CONSTANTS ---------------- */
 const LEFT_SCREEN_WIDTH = 2176;
+const RIGHT_SCREEN_WIDTH = 2048;
+const TOTAL_WIDTH = LEFT_SCREEN_WIDTH + RIGHT_SCREEN_WIDTH;
+
 const SPEED = 0.03;
 const START_TIME = 1700000000000;
-const MIN_INITIAL_STOCKS = 10;
 
 /* ---------------- DATA MODEL ----------------
-   set4Map = realtime latest state, no duplicates
+   set4Map = realtime latest values, no duplicates
    displayQueue = currently visible frozen ticker
-   nextQueue = latest prepared batch waiting for next loop
+   nextQueue = next full updated batch, applied only after full loop
 */
 const set4Map = new Map();
 
@@ -173,7 +171,7 @@ let nextQueue = [];
 
 let cycleWidth = 0;
 let lastX = 0;
-let firstRenderDone = false;
+let hasSnapshot = false;
 
 /* ---------------- SOCKET ---------------- */
 socket.on("connect", () => {
@@ -184,49 +182,68 @@ socket.on("connect_error", (err) => {
     console.error("❌ connect_error:", err);
 });
 
-/* Option 3: works if backend sends full snapshot */
+/*
+  IMPORTANT:
+  Backend must send full sorted stock list on connect.
+
+  Example payload:
+  [
+    {symbol:"AXISBANK", ltp:1361.2, change:-8.4, change_percent:-0.61},
+    ...
+  ]
+*/
 socket.on("ticker_snapshot", (data) => {
-    console.log("📦 Snapshot received");
+    console.log("📦 ticker_snapshot received:", data.length);
+
+    if (!Array.isArray(data) || data.length === 0) {
+        console.warn("⚠️ Empty snapshot received");
+        return;
+    }
 
     set4Map.clear();
 
     data.forEach(item => {
         if (item && item.symbol) {
-            set4Map.set(item.symbol, item);
+            set4Map.set(item.symbol, normalizeStock(item));
         }
     });
 
-    loadNextBatch();
-    firstRenderDone = true;
+    nextQueue = buildSortedSet4();
+
+    displayQueue = nextQueue.map(item => ({ ...item }));
+    renderTicker(displayQueue);
+
+    hasSnapshot = true;
 });
 
-/* Option 3: also works if backend only sends realtime stock_update */
+/*
+  Realtime updates ONLY update Set 4.
+  They do NOT rebuild the visible ticker immediately.
+*/
 socket.on("stock_update", (data) => {
     if (!data || !data.symbol) return;
 
-    set4Map.set(data.symbol, data);
+    const old = set4Map.get(data.symbol) || {};
+    set4Map.set(data.symbol, normalizeStock({ ...old, ...data }));
 
-    nextQueue = buildSortedSet4();
-
-    if (!firstRenderDone && set4Map.size >= MIN_INITIAL_STOCKS) {
-        console.log("⚡ Initial render from realtime updates");
-        loadNextBatch();
-        firstRenderDone = true;
+    if (hasSnapshot) {
+        nextQueue = buildSortedSet4();
     }
 });
 
-/* Final fallback if snapshot is not available and updates are slow */
-setTimeout(() => {
-    if (!firstRenderDone && set4Map.size > 0) {
-        console.log("⏳ Fallback initial render");
-        loadNextBatch();
-        firstRenderDone = true;
-    }
-}, 1500);
+/* ---------------- HELPERS ---------------- */
+function normalizeStock(d) {
+    return {
+        symbol: d.symbol,
+        ltp: d.ltp ?? "",
+        change: Number(d.change ?? 0),
+        change_percent: Number(d.change_percent ?? 0)
+    };
+}
 
-/* ---------------- UI ---------------- */
 function formatSignedNumber(v) {
-    return v >= 0 ? `+${v}` : `${v}`;
+    const n = Number(v || 0);
+    return n >= 0 ? `+${n}` : `${n}`;
 }
 
 function makeStockHTML(d) {
@@ -253,7 +270,6 @@ function makeStockHTML(d) {
     `;
 }
 
-/* ---------------- BUILD SET 4 BATCH ---------------- */
 function buildSortedSet4() {
     return Array.from(set4Map.values())
         .sort((a, b) => a.symbol.localeCompare(b.symbol))
@@ -275,40 +291,46 @@ function renderTicker(queue) {
         return;
     }
 
-    const html = queue.map(makeStockHTML).join("");
+    const baseHTML = queue.map(makeStockHTML).join("");
+
+    /*
+      Make the ribbon long enough.
+      This prevents empty gaps when the available stock count is small.
+    */
+    let repeatedHTML = baseHTML;
+
+    ticker1.innerHTML = repeatedHTML;
+    let width = ticker1.scrollWidth;
+
+    const minWidth = TOTAL_WIDTH * 3;
+
+    while (width < minWidth) {
+        repeatedHTML += baseHTML;
+        ticker1.innerHTML = repeatedHTML;
+        width = ticker1.scrollWidth;
+    }
 
     if (screenMode === "1") {
-        ticker1.innerHTML = html;
-        ticker1Clone.innerHTML = html;
+        ticker1.innerHTML = repeatedHTML;
+        ticker1Clone.innerHTML = repeatedHTML;
         cycleWidth = ticker1.scrollWidth;
         return;
     }
 
     if (screenMode === "2") {
-        ticker2.innerHTML = html;
-        ticker2Clone.innerHTML = html;
+        ticker2.innerHTML = repeatedHTML;
+        ticker2Clone.innerHTML = repeatedHTML;
         cycleWidth = ticker2.scrollWidth;
         return;
     }
 
-    ticker1.innerHTML = html;
-    ticker1Clone.innerHTML = html;
+    ticker1.innerHTML = repeatedHTML;
+    ticker1Clone.innerHTML = repeatedHTML;
 
-    ticker2.innerHTML = html;
-    ticker2Clone.innerHTML = html;
+    ticker2.innerHTML = repeatedHTML;
+    ticker2Clone.innerHTML = repeatedHTML;
 
     cycleWidth = ticker1.scrollWidth;
-}
-
-/* ---------------- LOAD NEXT BATCH ---------------- */
-function loadNextBatch() {
-    const batch = buildSortedSet4();
-    if (!batch.length) return;
-
-    nextQueue = batch.map(item => ({ ...item }));
-    displayQueue = nextQueue.map(item => ({ ...item }));
-
-    renderTicker(displayQueue);
 }
 
 /* ---------------- ANIMATION ---------------- */
@@ -321,18 +343,15 @@ function animate() {
     const x = (now * SPEED) % cycleWidth;
 
     /*
-      Full loop completed.
-      Re-render only here, never on incoming realtime updates.
+      Apply realtime-updated Set 4 only after one full ribbon loop.
+      During movement, visible ticker is frozen.
     */
     if (x < lastX) {
-        if (nextQueue.length > 0) {
-            const latest = buildSortedSet4();
-            nextQueue = latest;
+        if (hasSnapshot && nextQueue.length > 0) {
+            const oldSig = displayQueue.map(i => `${i.symbol}:${i.ltp}:${i.change}:${i.change_percent}`).join("|");
+            const newSig = nextQueue.map(i => `${i.symbol}:${i.ltp}:${i.change}:${i.change_percent}`).join("|");
 
-            const oldSignature = displayQueue.map(x => `${x.symbol}:${x.ltp}:${x.change}:${x.change_percent}`).join("|");
-            const newSignature = nextQueue.map(x => `${x.symbol}:${x.ltp}:${x.change}:${x.change_percent}`).join("|");
-
-            if (oldSignature !== newSignature) {
+            if (oldSig !== newSig) {
                 displayQueue = nextQueue.map(item => ({ ...item }));
                 renderTicker(displayQueue);
             }
