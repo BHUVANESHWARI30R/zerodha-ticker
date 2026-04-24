@@ -132,7 +132,7 @@ body {
 </div>
 
 <script>
-console.log("SYNCED SMOOTH TICKER LOADED");
+console.log("SET4 LOCKED TICKER LOADED");
 
 const socket = io();
 
@@ -148,11 +148,6 @@ const ticker2Clone = document.getElementById("ticker2-clone");
 const row1 = document.getElementById("row1");
 const row2 = document.getElementById("row2");
 
-/* ---------------- URL MODE ----------------
-   ?screen=1  -> only row1
-   ?screen=2  -> only row2
-   no param   -> both rows (browser preview)
-*/
 const params = new URLSearchParams(window.location.search);
 const screenMode = params.get("screen") || "both";
 
@@ -168,16 +163,32 @@ if (screenMode === "2") {
 
 /* ---------------- CONSTANTS ---------------- */
 const LEFT_SCREEN_WIDTH = 2176;
-const SPEED = 0.02;              // smooth synced speed
-          
-const START_TIME = 1700000000000; // fixed absolute reference
+const SPEED = 0.03;
+const START_TIME = 1700000000000;
 const UPDATE_INTERVAL_MS = 300;
 
-/* ---------------- DATA ---------------- */
+/* ---------------- MODEL ----------------
+   set4Map     = realtime latest data, no duplicates
+   queue3Batch = frozen batch prepared after loop
+   queue2Batch = right-side feeder concept
+   queue1Batch = left-side visible concept
+   displayQueue = currently rendered ticker ribbon
+
+   Realtime updates touch ONLY set4Map.
+   Ticker updates ONLY after full loop.
+*/
+const set4Map = new Map();
+
+let queue1Batch = [];
+let queue2Batch = [];
+let queue3Batch = [];
 let displayQueue = [];
+
 const pendingUpdates = {};
-const queue3State = new Map();
+
 let cycleWidth = 0;
+let lastX = 0;
+let firstRenderDone = false;
 
 /* ---------------- SOCKET ---------------- */
 socket.on("connect", () => {
@@ -221,20 +232,46 @@ function makeStockHTML(data) {
     `;
 }
 
+/* ---------------- SET 4 ---------------- */
+function updateSet4Only() {
+    const symbols = Object.keys(pendingUpdates);
+    if (!symbols.length) return;
+
+    const now = Date.now();
+
+    for (const symbol of symbols) {
+        set4Map.set(symbol, {
+            ...pendingUpdates[symbol],
+            ts: now
+        });
+
+        delete pendingUpdates[symbol];
+    }
+}
+
+function buildSortedSet4Batch() {
+    return Array.from(set4Map.values())
+        .sort((a, b) => a.symbol.localeCompare(b.symbol))
+        .map(item => ({ ...item }));
+}
+
 /* ---------------- RENDER ---------------- */
-function renderTicker() {
-    if (!displayQueue.length) {
-        ticker1.innerHTML = "";
-        ticker1Clone.innerHTML = "";
-        ticker2.innerHTML = "";
-        ticker2Clone.innerHTML = "";
-        cycleWidth = 0;
+function clearTicker() {
+    ticker1.innerHTML = "";
+    ticker1Clone.innerHTML = "";
+    ticker2.innerHTML = "";
+    ticker2Clone.innerHTML = "";
+    cycleWidth = 0;
+}
+
+function renderTickerFrom(queue) {
+    if (!queue.length) {
+        clearTicker();
         return;
     }
 
-    const html = displayQueue.map(makeStockHTML).join("");
+    const html = queue.map(makeStockHTML).join("");
 
-    // duplicate once for seamless loop
     ticker1.innerHTML = html;
     ticker1Clone.innerHTML = html;
 
@@ -244,7 +281,20 @@ function renderTicker() {
     cycleWidth = ticker1.scrollWidth || ticker2.scrollWidth;
 }
 
-/* ---------------- ABSOLUTE-TIME SYNC ---------------- */
+/* ---------------- APPLY NEW BATCH ONLY AFTER LOOP ---------------- */
+function loadNextBatchFromSet4() {
+    const batch = buildSortedSet4Batch();
+    if (!batch.length) return;
+
+    queue3Batch = batch.map(item => ({ ...item }));
+    queue2Batch = queue3Batch.map(item => ({ ...item }));
+    queue1Batch = queue2Batch.map(item => ({ ...item }));
+
+    displayQueue = queue1Batch.map(item => ({ ...item }));
+    renderTickerFrom(displayQueue);
+}
+
+/* ---------------- ANIMATION ---------------- */
 function animate() {
     requestAnimationFrame(animate);
 
@@ -252,6 +302,17 @@ function animate() {
 
     const now = Date.now() - START_TIME;
     const x = (now * SPEED) % cycleWidth;
+
+    /*
+      Full loop completed.
+      Only now we copy Set 4 into Queue 3 → Queue 2 → Queue 1.
+      No realtime update touches the running ticker mid-flow.
+    */
+    if (x < lastX) {
+        loadNextBatchFromSet4();
+    }
+
+    lastX = x;
 
     const leftOffset = x;
     const rightOffset = x + LEFT_SCREEN_WIDTH;
@@ -265,36 +326,21 @@ function animate() {
     }
 }
 
-/* ---------------- UPDATE QUEUE ---------------- */
+/* ---------------- UPDATE LOOP ---------------- */
 setInterval(() => {
-    const symbols = Object.keys(pendingUpdates);
-    if (!symbols.length) return;
+    updateSet4Only();
 
-    const now = Date.now();
-
-    for (const symbol of symbols) {
-        const data = pendingUpdates[symbol];
-        queue3State.set(symbol, {
-            ...data,
-            ts: now
-        });
-        delete pendingUpdates[symbol];
+    /*
+      First render only.
+      After first render, visible queues are frozen until loop completes.
+    */
+    if (!firstRenderDone && set4Map.size > 0) {
+        loadNextBatchFromSet4();
+        firstRenderDone = true;
     }
-
-    const nextQueue = [];
-    for (const [, data] of queue3State) {
-        nextQueue.push(data);
-    }
-
-    nextQueue.sort((a, b) => a.symbol.localeCompare(b.symbol));
-    displayQueue = nextQueue;
-
-    renderTicker();
 }, UPDATE_INTERVAL_MS);
 
-
 /* ---------------- START ---------------- */
-renderTicker();
 animate();
 </script>
 
