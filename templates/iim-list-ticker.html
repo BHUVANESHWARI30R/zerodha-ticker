@@ -132,10 +132,11 @@ body {
 </div>
 
 <script>
-console.log("SET4 LOCKED TICKER LOADED");
+console.log("FINAL SYNC TICKER LOADED");
 
 const socket = io();
 
+/* ---------------- DOM ---------------- */
 const wrapper1 = document.getElementById("wrapper1");
 const wrapper2 = document.getElementById("wrapper2");
 
@@ -148,127 +149,87 @@ const ticker2Clone = document.getElementById("ticker2-clone");
 const row1 = document.getElementById("row1");
 const row2 = document.getElementById("row2");
 
+/* ---------------- SCREEN MODE ---------------- */
 const params = new URLSearchParams(window.location.search);
 const screenMode = params.get("screen") || "both";
 
-if (screenMode === "1") {
-    row2.style.visibility = "hidden";
-    row2.style.position = "absolute";
-}
-
-if (screenMode === "2") {
-    row1.style.visibility = "hidden";
-    row1.style.position = "absolute";
-}
+if (screenMode === "1") row2.remove();
+if (screenMode === "2") row1.remove();
 
 /* ---------------- CONSTANTS ---------------- */
 const LEFT_SCREEN_WIDTH = 2176;
 const SPEED = 0.03;
 const START_TIME = 1700000000000;
-const UPDATE_INTERVAL_MS = 300;
+const UPDATE_INTERVAL_MS = 200;
 
-/* ---------------- MODEL ----------------
-   set4Map     = realtime latest data, no duplicates
-   queue3Batch = frozen batch prepared after loop
-   queue2Batch = right-side feeder concept
-   queue1Batch = left-side visible concept
-   displayQueue = currently rendered ticker ribbon
+/* ---------------- DATA ---------------- */
+const set4Map = new Map();   // master latest state
 
-   Realtime updates touch ONLY set4Map.
-   Ticker updates ONLY after full loop.
-*/
-const set4Map = new Map();
-
-let queue1Batch = [];
-let queue2Batch = [];
-let queue3Batch = [];
 let displayQueue = [];
-
-const pendingUpdates = {};
+let nextQueue = [];
 
 let cycleWidth = 0;
 let lastX = 0;
 let firstRenderDone = false;
 
 /* ---------------- SOCKET ---------------- */
-socket.on("connect", () => {
-    console.log("✅ Connected to backend");
+
+// 🔥 FULL SNAPSHOT (VERY IMPORTANT)
+socket.on("ticker_snapshot", (data) => {
+    console.log("📦 Snapshot received");
+
+    set4Map.clear();
+
+    data.forEach(item => {
+        set4Map.set(item.symbol, item);
+    });
+
+    loadNextBatch();   // same start for all screens
+    firstRenderDone = true;
 });
 
-socket.on("connect_error", (err) => {
-    console.error("❌ connect_error:", err);
-});
-
+// realtime updates
 socket.on("stock_update", (data) => {
-    pendingUpdates[data.symbol] = data;
+    set4Map.set(data.symbol, data); // ONLY update Set 4
 });
 
 /* ---------------- UI ---------------- */
-function formatSignedNumber(value) {
-    return value >= 0 ? `+${value}` : `${value}`;
+function formatSignedNumber(v) {
+    return v >= 0 ? `+${v}` : `${v}`;
 }
 
-function makeStockHTML(data) {
-    const colorClass = data.change < 0 ? "down" : "up";
-    const arrow = data.change >= 0 ? "▲" : "▼";
+function makeStockHTML(d) {
+    const color = d.change < 0 ? "down" : "up";
+    const arrow = d.change >= 0 ? "▲" : "▼";
 
     return `
-        <div class="stock" data-symbol="${data.symbol}">
-            <div class="stock-text">
-                <div>
-                    <div class="symbol-ltp ${colorClass}">${data.symbol}</div>
-                    <div class="symbol-ltp ${colorClass}">${data.ltp}</div>
-                </div>
+    <div class="stock">
+        <div class="stock-text">
+            <div>
+                <div class="symbol-ltp ${color}">${d.symbol}</div>
+                <div class="symbol-ltp ${color}">${d.ltp}</div>
+            </div>
 
-                <div class="change-arrow ${colorClass}" style="flex-direction: column; align-items: flex-end;">
-                    <div>(${data.change_percent}%)</div>
-                    <div>
-                        <span class="arrow">${arrow}</span>
-                        <span>${formatSignedNumber(data.change)}</span>
-                    </div>
+            <div class="change-arrow ${color}" style="flex-direction: column; align-items: flex-end;">
+                <div>(${d.change_percent}%)</div>
+                <div>
+                    <span class="arrow">${arrow}</span>
+                    <span>${formatSignedNumber(d.change)}</span>
                 </div>
             </div>
         </div>
-    `;
+    </div>`;
 }
 
-/* ---------------- SET 4 ---------------- */
-function updateSet4Only() {
-    const symbols = Object.keys(pendingUpdates);
-    if (!symbols.length) return;
-
-    const now = Date.now();
-
-    for (const symbol of symbols) {
-        set4Map.set(symbol, {
-            ...pendingUpdates[symbol],
-            ts: now
-        });
-
-        delete pendingUpdates[symbol];
-    }
-}
-
-function buildSortedSet4Batch() {
+/* ---------------- BUILD BATCH ---------------- */
+function buildSortedSet4() {
     return Array.from(set4Map.values())
-        .sort((a, b) => a.symbol.localeCompare(b.symbol))
-        .map(item => ({ ...item }));
+        .sort((a, b) => a.symbol.localeCompare(b.symbol));
 }
 
 /* ---------------- RENDER ---------------- */
-function clearTicker() {
-    ticker1.innerHTML = "";
-    ticker1Clone.innerHTML = "";
-    ticker2.innerHTML = "";
-    ticker2Clone.innerHTML = "";
-    cycleWidth = 0;
-}
-
-function renderTickerFrom(queue) {
-    if (!queue.length) {
-        clearTicker();
-        return;
-    }
+function renderTicker(queue) {
+    if (!queue.length) return;
 
     const html = queue.map(makeStockHTML).join("");
 
@@ -278,20 +239,18 @@ function renderTickerFrom(queue) {
     ticker2.innerHTML = html;
     ticker2Clone.innerHTML = html;
 
-    cycleWidth = ticker1.scrollWidth || ticker2.scrollWidth;
+    cycleWidth = ticker1.scrollWidth;
 }
 
-/* ---------------- APPLY NEW BATCH ONLY AFTER LOOP ---------------- */
-function loadNextBatchFromSet4() {
-    const batch = buildSortedSet4Batch();
+/* ---------------- LOAD NEXT BATCH ---------------- */
+function loadNextBatch() {
+    const batch = buildSortedSet4();
     if (!batch.length) return;
 
-    queue3Batch = batch.map(item => ({ ...item }));
-    queue2Batch = queue3Batch.map(item => ({ ...item }));
-    queue1Batch = queue2Batch.map(item => ({ ...item }));
+    nextQueue = batch.map(i => ({ ...i }));
 
-    displayQueue = queue1Batch.map(item => ({ ...item }));
-    renderTickerFrom(displayQueue);
+    displayQueue = nextQueue;
+    renderTicker(displayQueue);
 }
 
 /* ---------------- ANIMATION ---------------- */
@@ -303,42 +262,24 @@ function animate() {
     const now = Date.now() - START_TIME;
     const x = (now * SPEED) % cycleWidth;
 
-    /*
-      Full loop completed.
-      Only now we copy Set 4 into Queue 3 → Queue 2 → Queue 1.
-      No realtime update touches the running ticker mid-flow.
-    */
+    // 🔥 LOOP COMPLETE
     if (x < lastX) {
-        loadNextBatchFromSet4();
+        loadNextBatch(); // update ONLY here
     }
 
     lastX = x;
 
-    const leftOffset = x;
-    const rightOffset = x + LEFT_SCREEN_WIDTH;
+    const left = x;
+    const right = x + LEFT_SCREEN_WIDTH;
 
     if (screenMode !== "2") {
-        wrapper1.style.transform = `translate3d(${-leftOffset}px,0,0)`;
+        wrapper1.style.transform = `translate3d(${-left}px,0,0)`;
     }
 
     if (screenMode !== "1") {
-        wrapper2.style.transform = `translate3d(${-rightOffset}px,0,0)`;
+        wrapper2.style.transform = `translate3d(${-right}px,0,0)`;
     }
 }
-
-/* ---------------- UPDATE LOOP ---------------- */
-setInterval(() => {
-    updateSet4Only();
-
-    /*
-      First render only.
-      After first render, visible queues are frozen until loop completes.
-    */
-    if (!firstRenderDone && set4Map.size > 0) {
-        loadNextBatchFromSet4();
-        firstRenderDone = true;
-    }
-}, UPDATE_INTERVAL_MS);
 
 /* ---------------- START ---------------- */
 animate();
