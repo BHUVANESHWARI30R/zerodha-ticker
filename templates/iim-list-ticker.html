@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>DigiWave Smooth 2 Screen Ticker</title>
+<title>DigiWave Smooth Real-Time Ticker</title>
 
 <link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
@@ -32,6 +32,7 @@ html, body {
     display: flex;
     align-items: center;
     width: max-content;
+
     will-change: transform;
     transform: translate3d(0,0,0);
     backface-visibility: hidden;
@@ -45,16 +46,19 @@ html, body {
     flex-shrink: 0;
 }
 
+/* STOCK CARD */
 .stock {
     width: 310px;
     height: 110px;
     margin-right: 70px;
     flex-shrink: 0;
-    color: #fff;
+
     display: flex;
     flex-direction: column;
     justify-content: center;
+
     letter-spacing: 1px;
+    font-variant-numeric: tabular-nums;
 }
 
 .row {
@@ -67,7 +71,6 @@ html, body {
 .symbol {
     font-size: 43px;
     font-weight: 700;
-    color: #fff;
 }
 
 .percent {
@@ -79,7 +82,6 @@ html, body {
 .price {
     font-size: 39px;
     font-weight: 600;
-    color: #fff;
 }
 
 .change {
@@ -88,23 +90,27 @@ html, body {
     text-align: right;
 }
 
-.price,
-.percent,
-.change {
-    font-variant-numeric: tabular-nums;
-}
-
+/* WHOLE STOCK COLOR */
+.stock.up,
+.stock.up .symbol,
 .stock.up .percent,
+.stock.up .price,
 .stock.up .change {
     color: #00ff00;
 }
 
+.stock.down,
+.stock.down .symbol,
 .stock.down .percent,
+.stock.down .price,
 .stock.down .change {
     color: #ff2b2b;
 }
 
+.stock.flat,
+.stock.flat .symbol,
 .stock.flat .percent,
+.stock.flat .price,
 .stock.flat .change {
     color: #ffffff;
 }
@@ -126,11 +132,13 @@ html, body {
         </div>
         <div id="track2" class="ticker-track"></div>
         <div id="track3" class="ticker-track"></div>
+        <div id="track4" class="ticker-track"></div>
+        <div id="track5" class="ticker-track"></div>
     </div>
 </div>
 
 <script>
-/* ================= CONFIG ================= */
+/* ---------------- CONFIG ---------------- */
 
 const LEFT_WIDTH = 2176;
 const RIGHT_WIDTH = 2048;
@@ -141,17 +149,20 @@ const SCREEN = params.get("screen") || "1";
 const SCREEN_OFFSET = SCREEN === "2" ? LEFT_WIDTH : 0;
 
 /*
-    Try:
-    45 = slow
-    60 = normal LED ticker
-    75 = faster
+    Adjust this only.
+    Try 45, 55, 65.
 */
 const SPEED = 55;
 
 const EXPECTED_SYMBOLS = 50;
-const FORCE_START_AFTER_MS = 3000;
+const START_AFTER_MS = 3000;
 
-/* ================= STATE ================= */
+/*
+    Realtime text refresh speed.
+*/
+const TEXT_UPDATE_INTERVAL_MS = 250;
+
+/* ---------------- STATE ---------------- */
 
 const socket = io();
 
@@ -161,28 +172,32 @@ const pendingStockMap = new Map();
 let tickerSequence = [];
 let cardElements = new Map();
 
-let trackWidth = 1;
+let baseTrackWidth = 1;
 let started = false;
 
-let serverOffset = 0;
-let startServerTime = null;
+let startTime = null;
 let lastTextUpdate = 0;
 
 const wrapper = document.getElementById("tickerWrapper");
-const track1 = document.getElementById("track1");
-const track2 = document.getElementById("track2");
-const track3 = document.getElementById("track3");
+const tracks = [
+    document.getElementById("track1"),
+    document.getElementById("track2"),
+    document.getElementById("track3"),
+    document.getElementById("track4"),
+    document.getElementById("track5")
+];
 
-/* ================= SOCKET ================= */
+/* ---------------- SOCKET ---------------- */
 
 socket.on("connect", () => {
-    console.log("Connected to backend");
+    console.log("✅ Connected to backend");
 });
 
-socket.on("sync_time", data => {
-    if (!data || !data.server_time) return;
-    serverOffset = Number(data.server_time) - Date.now();
-});
+/*
+    Do not use sync_time continuously.
+    Continuous sync_time can create small jump/stutter.
+*/
+socket.on("sync_time", () => {});
 
 socket.on("stock_update", data => {
     const stock = normalizeStock(data);
@@ -196,7 +211,7 @@ socket.on("stock_update", data => {
     }
 });
 
-/* ================= NORMALIZE ================= */
+/* ---------------- DATA ---------------- */
 
 function normalizeStock(data) {
     return {
@@ -207,7 +222,19 @@ function normalizeStock(data) {
     };
 }
 
-/* ================= CARD ================= */
+/* ---------------- CARD ---------------- */
+
+function getDirection(stock) {
+    if (stock.change > 0) return "up";
+    if (stock.change < 0) return "down";
+    return "flat";
+}
+
+function getArrow(stock) {
+    if (stock.change > 0) return "▲";
+    if (stock.change < 0) return "▼";
+    return "●";
+}
 
 function cardHTML(stock) {
     const direction = getDirection(stock);
@@ -228,49 +255,37 @@ function cardHTML(stock) {
     `;
 }
 
-function getDirection(stock) {
-    if (stock.change > 0) return "up";
-    if (stock.change < 0) return "down";
-    return "flat";
-}
-
-function getArrow(stock) {
-    if (stock.change > 0) return "▲";
-    if (stock.change < 0) return "▼";
-    return "●";
-}
-
-/* ================= START ================= */
+/* ---------------- START ---------------- */
 
 function startTicker() {
     if (started) return;
 
     tickerSequence = Array.from(latestStockMap.keys()).sort();
 
-    const html = tickerSequence.map(symbol => {
-        return cardHTML(latestStockMap.get(symbol));
-    }).join("");
+    const html = tickerSequence
+        .map(symbol => cardHTML(latestStockMap.get(symbol)))
+        .join("");
 
-    track1.innerHTML = html;
-    track2.innerHTML = html;
-    track3.innerHTML = html;
+    tracks.forEach(track => {
+        track.innerHTML = html;
+    });
 
-    collectCardElements();
+    collectCards();
 
     requestAnimationFrame(() => {
-        trackWidth = track1.scrollWidth || 1;
+        baseTrackWidth = tracks[0].scrollWidth || 1;
+        startTime = performance.now();
         started = true;
-        startServerTime = Date.now() + serverOffset;
 
-        console.log("Ticker started", {
+        console.log("✅ Ticker started", {
             screen: SCREEN,
             symbols: tickerSequence.length,
-            trackWidth
+            baseTrackWidth
         });
     });
 }
 
-function collectCardElements() {
+function collectCards() {
     cardElements.clear();
 
     document.querySelectorAll(".stock").forEach(card => {
@@ -284,9 +299,9 @@ function collectCardElements() {
     });
 }
 
-/* ================= SAFE TEXT UPDATE ONLY ================= */
+/* ---------------- REALTIME TEXT UPDATE ---------------- */
 
-function applyPendingTextUpdates() {
+function applyRealtimeTextUpdates() {
     if (pendingStockMap.size === 0) return;
 
     pendingStockMap.forEach((stock, symbol) => {
@@ -311,40 +326,41 @@ function applyPendingTextUpdates() {
     pendingStockMap.clear();
 }
 
-/* ================= ANIMATION ================= */
+/* ---------------- SMOOTH SCROLL ---------------- */
 
-function animate() {
+function animate(now) {
     requestAnimationFrame(animate);
 
-    if (!started || trackWidth <= 1 || startServerTime === null) return;
+    if (!started || !startTime || baseTrackWidth <= 1) return;
 
-    const now = Date.now() + serverOffset;
-    const elapsed = (now - startServerTime) / 1000;
+    const elapsed = (now - startTime) / 1000;
 
-    const move = (elapsed * SPEED) % trackWidth;
+    /*
+        This never stops.
+        It loops only by baseTrackWidth.
+        Extra tracks keep screen 2 filled.
+    */
+    const move = (elapsed * SPEED) % baseTrackWidth;
 
     const x = -(move + SCREEN_OFFSET);
 
     wrapper.style.transform = `translate3d(${x}px, 0, 0)`;
 
-    /*
-        Text updates only every 1 second.
-        No rebuild, no layout reset.
-    */
-    if (performance.now() - lastTextUpdate > 1000) {
-        applyPendingTextUpdates();
-        lastTextUpdate = performance.now();
+    if (now - lastTextUpdate >= TEXT_UPDATE_INTERVAL_MS) {
+        applyRealtimeTextUpdates();
+        lastTextUpdate = now;
     }
 }
 
 requestAnimationFrame(animate);
 
-/* Fallback start */
+/* fallback */
 setTimeout(() => {
     if (!started && latestStockMap.size > 0) {
         startTicker();
     }
-}, FORCE_START_AFTER_MS);
+}, START_AFTER_MS);
+
 </script>
 
 </body>
