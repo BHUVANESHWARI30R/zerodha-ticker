@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>DigiWave Smooth Real-Time Ticker</title>
+<title>DigiWave Final Smooth Ticker</title>
 
 <link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
@@ -16,109 +16,78 @@ html, body {
     font-family: 'Teko', sans-serif;
 }
 
+/* CONTAINER */
 .ticker-container {
     width: 100vw;
     height: 120px;
     overflow: hidden;
-    position: relative;
-    background: #000;
 }
 
+/* MOVING LAYER */
 .ticker-wrapper {
-    position: absolute;
-    left: 0;
-    top: 0;
-    height: 120px;
     display: flex;
-    align-items: center;
     width: max-content;
-
     will-change: transform;
     transform: translate3d(0,0,0);
-    backface-visibility: hidden;
 }
 
+/* TRACK */
 .ticker-track {
     display: flex;
-    align-items: center;
-    height: 120px;
-    white-space: nowrap;
-    flex-shrink: 0;
 }
 
 /* STOCK CARD */
 .stock {
-    width: 310px;
+    width: 430px;
     height: 110px;
-    margin-right: 70px;
+    margin-right: 80px;
     flex-shrink: 0;
-
     display: flex;
     flex-direction: column;
     justify-content: center;
-
-    letter-spacing: 1px;
     font-variant-numeric: tabular-nums;
 }
 
+/* ROW LAYOUT */
 .row {
-    display: flex;
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: 260px 150px;
     align-items: center;
-    line-height: 1.05;
 }
 
+/* TEXT */
 .symbol {
-    font-size: 43px;
+    font-size: 42px;
     font-weight: 700;
+    white-space: nowrap;
 }
 
 .percent {
     font-size: 34px;
-    font-weight: 600;
     text-align: right;
 }
 
 .price {
-    font-size: 39px;
-    font-weight: 600;
+    font-size: 38px;
+    white-space: nowrap;
 }
 
 .change {
     font-size: 34px;
-    font-weight: 600;
     text-align: right;
 }
 
-/* WHOLE STOCK COLOR */
-.stock.up,
-.stock.up .symbol,
-.stock.up .percent,
-.stock.up .price,
-.stock.up .change {
+/* COLORS */
+.stock.up, .stock.up * {
     color: #00ff00;
 }
 
-.stock.down,
-.stock.down .symbol,
-.stock.down .percent,
-.stock.down .price,
-.stock.down .change {
+.stock.down, .stock.down * {
     color: #ff2b2b;
 }
 
-.stock.flat,
-.stock.flat .symbol,
-.stock.flat .percent,
-.stock.flat .price,
-.stock.flat .change {
+.stock.flat, .stock.flat * {
     color: #ffffff;
-}
-
-.loading {
-    color: #444;
-    font-size: 40px;
-    padding-left: 40px;
 }
 </style>
 </head>
@@ -126,241 +95,142 @@ html, body {
 <body>
 
 <div class="ticker-container">
-    <div id="tickerWrapper" class="ticker-wrapper">
-        <div id="track1" class="ticker-track">
-            <div class="loading">WAITING FOR LIVE DATA...</div>
-        </div>
+    <div id="wrapper" class="ticker-wrapper">
+        <div id="track1" class="ticker-track"></div>
         <div id="track2" class="ticker-track"></div>
         <div id="track3" class="ticker-track"></div>
         <div id="track4" class="ticker-track"></div>
-        <div id="track5" class="ticker-track"></div>
     </div>
 </div>
 
 <script>
-/* ---------------- CONFIG ---------------- */
+/* ================= CONFIG ================= */
 
 const LEFT_WIDTH = 2176;
-const RIGHT_WIDTH = 2048;
+const SCREEN = new URLSearchParams(location.search).get("screen") || "1";
+const OFFSET = SCREEN === "2" ? LEFT_WIDTH : 0;
 
-const params = new URLSearchParams(window.location.search);
-const SCREEN = params.get("screen") || "1";
+const SPEED = 45; // 🔥 smooth speed
 
-const SCREEN_OFFSET = SCREEN === "2" ? LEFT_WIDTH : 0;
-
-/*
-    Adjust this only.
-    Try 45, 55, 65.
-*/
-const SPEED = 55;
-
-const EXPECTED_SYMBOLS = 50;
-const START_AFTER_MS = 3000;
-
-/*
-    Realtime text refresh speed.
-*/
-const TEXT_UPDATE_INTERVAL_MS = 250;
-
-/* ---------------- STATE ---------------- */
+/* ================= STATE ================= */
 
 const socket = io();
 
-const latestStockMap = new Map();
-const pendingStockMap = new Map();
+const latest = new Map();
+const cards = new Map();
 
-let tickerSequence = [];
-let cardElements = new Map();
-
-let baseTrackWidth = 1;
+let sequence = [];
+let width = 1;
 let started = false;
 
-let startTime = null;
-let lastTextUpdate = 0;
-
-const wrapper = document.getElementById("tickerWrapper");
+const wrapper = document.getElementById("wrapper");
 const tracks = [
     document.getElementById("track1"),
     document.getElementById("track2"),
     document.getElementById("track3"),
-    document.getElementById("track4"),
-    document.getElementById("track5")
+    document.getElementById("track4")
 ];
 
-/* ---------------- SOCKET ---------------- */
-
-socket.on("connect", () => {
-    console.log("✅ Connected to backend");
-});
-
-/*
-    Do not use sync_time continuously.
-    Continuous sync_time can create small jump/stutter.
-*/
-socket.on("sync_time", () => {});
+/* ================= SOCKET ================= */
 
 socket.on("stock_update", data => {
-    const stock = normalizeStock(data);
-    if (!stock.symbol) return;
+    const s = {
+        symbol: data.symbol,
+        ltp: +data.ltp,
+        change: +data.change,
+        pct: +data.change_percent
+    };
 
-    latestStockMap.set(stock.symbol, stock);
-    pendingStockMap.set(stock.symbol, stock);
+    latest.set(s.symbol, s);
 
-    if (!started && latestStockMap.size >= EXPECTED_SYMBOLS) {
+    if (!started && latest.size >= 40) {
         startTicker();
     }
+
+    updateCard(s);
 });
 
-/* ---------------- DATA ---------------- */
-
-function normalizeStock(data) {
-    return {
-        symbol: String(data.symbol || "").trim(),
-        ltp: Number(data.ltp || 0),
-        change: Number(data.change || 0),
-        change_percent: Number(data.change_percent || 0)
-    };
-}
-
-/* ---------------- CARD ---------------- */
-
-function getDirection(stock) {
-    if (stock.change > 0) return "up";
-    if (stock.change < 0) return "down";
-    return "flat";
-}
-
-function getArrow(stock) {
-    if (stock.change > 0) return "▲";
-    if (stock.change < 0) return "▼";
-    return "●";
-}
-
-function cardHTML(stock) {
-    const direction = getDirection(stock);
-    const arrow = getArrow(stock);
-    const percentSign = stock.change_percent > 0 ? "+" : "";
-
-    return `
-        <div class="stock ${direction}" data-symbol="${stock.symbol}">
-            <div class="row">
-                <span class="symbol">${stock.symbol}</span>
-                <span class="percent">${percentSign}${stock.change_percent.toFixed(2)}%</span>
-            </div>
-            <div class="row">
-                <span class="price">${stock.ltp.toFixed(2)}</span>
-                <span class="change">${arrow} ${Math.abs(stock.change).toFixed(2)}</span>
-            </div>
-        </div>
-    `;
-}
-
-/* ---------------- START ---------------- */
+/* ================= START ================= */
 
 function startTicker() {
-    if (started) return;
+    sequence = Array.from(latest.keys()).sort();
 
-    tickerSequence = Array.from(latestStockMap.keys()).sort();
+    const html = sequence.map(sym => renderCard(latest.get(sym))).join("");
 
-    const html = tickerSequence
-        .map(symbol => cardHTML(latestStockMap.get(symbol)))
-        .join("");
+    tracks.forEach(t => t.innerHTML = html);
 
-    tracks.forEach(track => {
-        track.innerHTML = html;
-    });
-
-    collectCards();
+    mapCards();
 
     requestAnimationFrame(() => {
-        baseTrackWidth = tracks[0].scrollWidth || 1;
-        startTime = performance.now();
+        width = tracks[0].scrollWidth;
         started = true;
-
-        console.log("✅ Ticker started", {
-            screen: SCREEN,
-            symbols: tickerSequence.length,
-            baseTrackWidth
-        });
     });
 }
 
-function collectCards() {
-    cardElements.clear();
+/* ================= CARD ================= */
 
-    document.querySelectorAll(".stock").forEach(card => {
-        const symbol = card.dataset.symbol;
+function renderCard(s) {
+    const dir = s.change > 0 ? "up" : s.change < 0 ? "down" : "flat";
+    const arrow = s.change > 0 ? "▲" : s.change < 0 ? "▼" : "●";
+    const sign = s.pct > 0 ? "+" : "";
 
-        if (!cardElements.has(symbol)) {
-            cardElements.set(symbol, []);
-        }
+    return `
+    <div class="stock ${dir}" data-s="${s.symbol}">
+        <div class="row">
+            <div class="symbol">${s.symbol}</div>
+            <div class="percent">${sign}${s.pct.toFixed(2)}%</div>
+        </div>
+        <div class="row">
+            <div class="price">${s.ltp.toFixed(2)}</div>
+            <div class="change">${arrow} ${Math.abs(s.change).toFixed(2)}</div>
+        </div>
+    </div>`;
+}
 
-        cardElements.get(symbol).push(card);
+function mapCards() {
+    cards.clear();
+
+    document.querySelectorAll(".stock").forEach(el => {
+        const s = el.dataset.s;
+        if (!cards.has(s)) cards.set(s, []);
+        cards.get(s).push(el);
     });
 }
 
-/* ---------------- REALTIME TEXT UPDATE ---------------- */
+/* ================= REALTIME UPDATE ================= */
 
-function applyRealtimeTextUpdates() {
-    if (pendingStockMap.size === 0) return;
+function updateCard(s) {
+    const list = cards.get(s.symbol);
+    if (!list) return;
 
-    pendingStockMap.forEach((stock, symbol) => {
-        const cards = cardElements.get(symbol);
-        if (!cards) return;
+    const dir = s.change > 0 ? "up" : s.change < 0 ? "down" : "flat";
+    const arrow = s.change > 0 ? "▲" : s.change < 0 ? "▼" : "●";
+    const sign = s.pct > 0 ? "+" : "";
 
-        const direction = getDirection(stock);
-        const arrow = getArrow(stock);
-        const percentSign = stock.change_percent > 0 ? "+" : "";
-
-        cards.forEach(card => {
-            card.className = `stock ${direction}`;
-            card.querySelector(".percent").textContent =
-                `${percentSign}${stock.change_percent.toFixed(2)}%`;
-            card.querySelector(".price").textContent =
-                stock.ltp.toFixed(2);
-            card.querySelector(".change").textContent =
-                `${arrow} ${Math.abs(stock.change).toFixed(2)}`;
-        });
+    list.forEach(el => {
+        el.className = `stock ${dir}`;
+        el.querySelector(".percent").textContent = `${sign}${s.pct.toFixed(2)}%`;
+        el.querySelector(".price").textContent = s.ltp.toFixed(2);
+        el.querySelector(".change").textContent = `${arrow} ${Math.abs(s.change).toFixed(2)}`;
     });
-
-    pendingStockMap.clear();
 }
 
-/* ---------------- SMOOTH SCROLL ---------------- */
+/* ================= SMOOTH SCROLL ================= */
+
+let start = performance.now();
 
 function animate(now) {
     requestAnimationFrame(animate);
 
-    if (!started || !startTime || baseTrackWidth <= 1) return;
+    if (!started) return;
 
-    const elapsed = (now - startTime) / 1000;
+    const t = (now - start) / 1000;
+    const move = (t * SPEED) % width;
 
-    /*
-        This never stops.
-        It loops only by baseTrackWidth.
-        Extra tracks keep screen 2 filled.
-    */
-    const move = (elapsed * SPEED) % baseTrackWidth;
-
-    const x = -(move + SCREEN_OFFSET);
-
-    wrapper.style.transform = `translate3d(${x}px, 0, 0)`;
-
-    if (now - lastTextUpdate >= TEXT_UPDATE_INTERVAL_MS) {
-        applyRealtimeTextUpdates();
-        lastTextUpdate = now;
-    }
+    wrapper.style.transform = `translate3d(${-(move + OFFSET)}px,0,0)`;
 }
 
 requestAnimationFrame(animate);
-
-/* fallback */
-setTimeout(() => {
-    if (!started && latestStockMap.size > 0) {
-        startTicker();
-    }
-}, START_AFTER_MS);
-
 </script>
 
 </body>
