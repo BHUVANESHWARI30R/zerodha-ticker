@@ -2,365 +2,378 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>DigiWave Stock Ticker</title>
+<title>DigiWave 2 Screen Stock Ticker</title>
 
 <link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 
 <style>
-html, body {
-    margin: 0;
-    padding: 0;
-    background: #000;
-    font-family: 'Teko', sans-serif;
-    overflow: hidden;
+* {
+    box-sizing: border-box;
 }
 
+html,
 body {
-    line-height: 1;
-}
-
-.page {
     margin: 0;
     padding: 0;
-    width: 100%;
     background: #000;
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0;
-}
-
-.ticker-row {
     overflow: hidden;
-    display: flex;
-    align-items: center;
-    background: #000;
+    font-family: 'Teko', sans-serif;
+}
+
+.ticker-container {
+    width: 100vw;
+    height: 120px;
+    overflow: hidden;
     position: relative;
-    margin: 0;
-    padding: 0;
-}
-
-.list1-row {
-    width: 2176px;
-    height: 128px;
-}
-
-.list2-row {
-    width: 2048px;
-    height: 128px;
+    background: #000;
 }
 
 .ticker-wrapper {
+    position: absolute;
+    left: 0;
+    top: 0;
+    height: 120px;
     display: flex;
+    align-items: center;
     width: max-content;
+
     will-change: transform;
     transform: translate3d(0, 0, 0);
     backface-visibility: hidden;
-    margin: 0;
-    padding: 0;
+    transform-style: preserve-3d;
 }
 
-.ticker {
+.ticker-track {
     display: flex;
     align-items: center;
-    white-space: nowrap;
+    height: 120px;
     width: max-content;
-    flex-shrink: 0;
-    margin: 0;
-    padding: 0;
-}
-
-.stock {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-right: 80px;
-    min-width: 260px;
-    flex-shrink: 0;
-}
-
-.stock-text {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    width: 100%;
-    gap: 28px;
-}
-
-.symbol-ltp {
-    font-weight: bold;
-    font-size: 55px;
-    line-height: 1.10;
     white-space: nowrap;
 }
 
-.change-arrow {
-    font-size: 55px;
-    font-weight: bold;
+/* ---------- STOCK CARD UI ---------- */
+.stock {
+    width: 300px;
+    height: 110px;
+    margin-right: 70px;
+    flex-shrink: 0;
+
     display: flex;
+    flex-direction: column;
+    justify-content: center;
+
+    color: #fff;
+    letter-spacing: 1px;
+}
+
+.row {
+    display: flex;
+    justify-content: space-between;
     align-items: center;
-    line-height: 1.10;
+    line-height: 1.05;
 }
 
-.arrow {
-    margin-right: 2px;
+.symbol {
+    font-size: 43px;
+    font-weight: 700;
+    color: #ffffff;
 }
 
-.up { color: lime; }
-.down { color: red; }
+.percent {
+    font-size: 34px;
+    font-weight: 600;
+    text-align: right;
+}
+
+.price {
+    font-size: 39px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.change {
+    font-size: 34px;
+    font-weight: 600;
+    text-align: right;
+}
+
+.price,
+.percent,
+.change {
+    font-variant-numeric: tabular-nums;
+}
+
+.stock.up .percent,
+.stock.up .change {
+    color: #00ff00;
+}
+
+.stock.down .percent,
+.stock.down .change {
+    color: #ff2b2b;
+}
+
+.stock.flat .percent,
+.stock.flat .change {
+    color: #ffffff;
+}
+
+.loading {
+    color: #444;
+    font-size: 38px;
+    padding-left: 40px;
+}
 </style>
 </head>
 
 <body>
 
-<div class="page">
-    <div class="ticker-row list1-row" id="row1">
-        <div class="ticker-wrapper" id="wrapper1">
-            <div class="ticker" id="ticker1"></div>
-            <div class="ticker" id="ticker1-clone"></div>
+<div class="ticker-container">
+    <div id="tickerWrapper" class="ticker-wrapper">
+        <div id="tickerA" class="ticker-track">
+            <div class="loading">WAITING FOR LIVE DATA...</div>
         </div>
-    </div>
-
-    <div class="ticker-row list2-row" id="row2">
-        <div class="ticker-wrapper" id="wrapper2">
-            <div class="ticker" id="ticker2"></div>
-            <div class="ticker" id="ticker2-clone"></div>
-        </div>
+        <div id="tickerB" class="ticker-track"></div>
     </div>
 </div>
 
 <script>
-console.log("NEW SNAPSHOT RIBBON TICKER LOADED");
+/* ======================================================
+   2 SCREEN CONFIG
+====================================================== */
+
+const LEFT_WIDTH = 2176;
+const RIGHT_WIDTH = 2048;
+const TOTAL_WIDTH = 4224;
+
+const params = new URLSearchParams(window.location.search);
+const SCREEN = params.get("screen") || "1";
+
+/*
+    screen=1 shows first 2176px
+    screen=2 shows next 2048px
+*/
+const SCREEN_OFFSET = SCREEN === "2" ? LEFT_WIDTH : 0;
+
+/*
+    LED speed.
+    Try 60, 70, 80, 90.
+*/
+const SPEED_PX_PER_SECOND = 80;
+
+/*
+    How often pending updates are allowed to visually apply.
+    Bigger = smoother during market open.
+*/
+const MIN_REBUILD_GAP_MS = 1200;
+
+/* ======================================================
+   STATE
+====================================================== */
 
 const socket = io();
 
-const wrapper1 = document.getElementById("wrapper1");
-const wrapper2 = document.getElementById("wrapper2");
+const latestStockMap = new Map();
+const pendingUpdateMap = new Map();
 
-const ticker1 = document.getElementById("ticker1");
-const ticker1Clone = document.getElementById("ticker1-clone");
+let tickerSequence = [];
 
-const ticker2 = document.getElementById("ticker2");
-const ticker2Clone = document.getElementById("ticker2-clone");
+let trackWidth = 1;
+let isReady = false;
+let lastTimestamp = null;
+let scrollX = 0;
+let lastRebuildTime = 0;
 
-const row1 = document.getElementById("row1");
-const row2 = document.getElementById("row2");
+const tickerWrapper = document.getElementById("tickerWrapper");
+const tickerA = document.getElementById("tickerA");
+const tickerB = document.getElementById("tickerB");
 
-const params = new URLSearchParams(window.location.search);
-const screenMode = params.get("screen") || "both";
+/* ======================================================
+   SOCKET EVENTS
+====================================================== */
 
-if (screenMode === "1") {
-    row2.remove();
-}
-
-if (screenMode === "2") {
-    row1.remove();
-}
-
-/* ---------------- CONSTANTS ---------------- */
-const LEFT_SCREEN_WIDTH = 2176;
-const RIGHT_SCREEN_WIDTH = 2048;
-const TOTAL_WIDTH = LEFT_SCREEN_WIDTH + RIGHT_SCREEN_WIDTH;
-
-const SPEED = 0.03;                // px/ms
-const START_TIME = 1700000000000;  // fixed movement reference
-
-/* ---------------- DATA STRUCTURE ----------------
-   set4Map = realtime latest values, no duplicates
-   activeRibbon = visible frozen ticker
-   nextRibbon = next prepared batch
-*/
-const set4Map = new Map();
-
-let activeRibbon = [];
-let nextRibbon = [];
-
-let cycleWidth = 0;
-let lastX = 0;
-let latestVersion = 0;
-let hasInitialSnapshot = false;
-
-/* ---------------- SOCKET ---------------- */
 socket.on("connect", () => {
-    console.log("Connected to backend");
+    console.log("✅ Connected to backend");
 });
 
-socket.on("ticker_snapshot", (payload) => {
-    const data = Array.isArray(payload) ? payload : (payload.data || []);
-    const version = payload.version || 0;
-
-    if (!data.length) {
-        console.warn("Empty ticker_snapshot");
-        return;
-    }
-
-    latestVersion = version;
-
-    set4Map.clear();
-
-    data.forEach(item => {
-        if (item && item.symbol) {
-            set4Map.set(item.symbol, normalizeStock(item));
-        }
-    });
-
-    nextRibbon = buildSortedSet4();
-
-    if (!hasInitialSnapshot) {
-        activeRibbon = nextRibbon.map(item => ({ ...item }));
-        renderRibbon(activeRibbon);
-        hasInitialSnapshot = true;
-    }
-
-    console.log("Snapshot received:", data.length, "version:", version);
+socket.on("sync_time", (data) => {
+    // optional; backend already sends this
+    console.log("⏱ sync_time", data);
 });
 
+/*
+    Your current backend sends stock_update.
+    We DO NOT update visible DOM immediately.
+    We only store data first.
+*/
 socket.on("stock_update", (data) => {
-    if (!data || !data.symbol) return;
+    const stock = normalizeStock(data);
 
-    const old = set4Map.get(data.symbol) || {};
-    set4Map.set(data.symbol, normalizeStock({ ...old, ...data }));
+    if (!stock.symbol) return;
 
-    // Only prepare next ribbon. Do not render now.
-    if (hasInitialSnapshot) {
-        nextRibbon = buildSortedSet4();
+    latestStockMap.set(stock.symbol, stock);
+    pendingUpdateMap.set(stock.symbol, stock);
+
+    if (!isReady && latestStockMap.size >= 5) {
+        initializeTicker();
     }
 });
 
-/* ---------------- HELPERS ---------------- */
-function normalizeStock(d) {
+/* ======================================================
+   DATA NORMALIZE
+====================================================== */
+
+function normalizeStock(data) {
     return {
-        symbol: d.symbol,
-        ltp: d.ltp ?? "",
-        change: Number(d.change ?? 0),
-        change_percent: Number(d.change_percent ?? 0)
+        symbol: String(data.symbol || "").trim(),
+        ltp: Number(data.ltp || 0),
+        change: Number(data.change || 0),
+        change_percent: Number(data.change_percent || 0)
     };
 }
 
-function formatSignedNumber(value) {
-    const n = Number(value || 0);
-    return n >= 0 ? `+${n}` : `${n}`;
+/* ======================================================
+   INITIALIZE
+====================================================== */
+
+function initializeTicker() {
+    tickerSequence = Array.from(latestStockMap.keys()).sort();
+
+    buildTicker();
+
+    requestAnimationFrame(() => {
+        trackWidth = tickerA.scrollWidth || 1;
+        isReady = true;
+        console.log("✅ Ticker ready", {
+            screen: SCREEN,
+            symbols: tickerSequence.length,
+            width: trackWidth
+        });
+    });
 }
 
-function makeStockHTML(d) {
-    const colorClass = d.change < 0 ? "down" : "up";
-    const arrow = d.change >= 0 ? "▲" : "▼";
+/* ======================================================
+   STOCK CARD UI
+====================================================== */
+
+function createStockCard(stock) {
+    const isUp = stock.change > 0;
+    const isDown = stock.change < 0;
+
+    const cls = isUp ? "up" : isDown ? "down" : "flat";
+    const arrow = isUp ? "▲" : isDown ? "▼" : "●";
+    const percentSign = stock.change_percent > 0 ? "+" : "";
 
     return `
-        <div class="stock" data-symbol="${d.symbol}">
-            <div class="stock-text">
-                <div>
-                    <div class="symbol-ltp ${colorClass}">${d.symbol}</div>
-                    <div class="symbol-ltp ${colorClass}">${d.ltp}</div>
-                </div>
+        <div class="stock ${cls}" data-symbol="${stock.symbol}">
+            <div class="row top">
+                <span class="symbol">${stock.symbol}</span>
+                <span class="percent">${percentSign}${stock.change_percent.toFixed(2)}%</span>
+            </div>
 
-                <div class="change-arrow ${colorClass}" style="flex-direction: column; align-items: flex-end;">
-                    <div>(${d.change_percent}%)</div>
-                    <div>
-                        <span class="arrow">${arrow}</span>
-                        <span>${formatSignedNumber(d.change)}</span>
-                    </div>
-                </div>
+            <div class="row bottom">
+                <span class="price">${stock.ltp.toFixed(2)}</span>
+                <span class="change">${arrow} ${Math.abs(stock.change).toFixed(2)}</span>
             </div>
         </div>
     `;
 }
 
-function buildSortedSet4() {
-    return Array.from(set4Map.values())
-        .sort((a, b) => a.symbol.localeCompare(b.symbol))
-        .map(item => ({ ...item }));
+/* ======================================================
+   BUILD TICKER
+====================================================== */
+
+function buildTicker() {
+    if (tickerSequence.length === 0) return;
+
+    const html = tickerSequence.map(symbol => {
+        const stock = latestStockMap.get(symbol);
+        if (!stock) return "";
+        return createStockCard(stock);
+    }).join("");
+
+    tickerA.innerHTML = html;
+    tickerB.innerHTML = html;
+
+    requestAnimationFrame(() => {
+        trackWidth = tickerA.scrollWidth || 1;
+    });
 }
 
-function ribbonSignature(queue) {
-    return queue.map(i => `${i.symbol}:${i.ltp}:${i.change}:${i.change_percent}`).join("|");
+/* ======================================================
+   SAFE UPDATE LOGIC
+====================================================== */
+
+function applyPendingUpdatesSafely() {
+    const now = performance.now();
+
+    if (pendingUpdateMap.size === 0) return;
+    if (now - lastRebuildTime < MIN_REBUILD_GAP_MS) return;
+
+    pendingUpdateMap.forEach((stock, symbol) => {
+        latestStockMap.set(symbol, stock);
+    });
+
+    pendingUpdateMap.clear();
+
+    /*
+        Important:
+        We keep tickerSequence same.
+        No random reorder during scroll.
+    */
+    buildTicker();
+
+    lastRebuildTime = now;
 }
 
-/* ---------------- RENDER ---------------- */
-function renderRibbon(queue) {
-    if (!queue.length) {
-        clearTicker();
-        return;
-    }
+/* ======================================================
+   SMOOTH SCROLL ENGINE
+====================================================== */
 
-    const baseHTML = queue.map(makeStockHTML).join("");
-    let repeatedHTML = baseHTML;
-
-    ticker1.innerHTML = repeatedHTML;
-    let width = ticker1.scrollWidth;
-
-    const minWidth = TOTAL_WIDTH * 3;
-
-    while (width < minWidth) {
-        repeatedHTML += baseHTML;
-        ticker1.innerHTML = repeatedHTML;
-        width = ticker1.scrollWidth;
-    }
-
-    if (screenMode === "1") {
-        ticker1.innerHTML = repeatedHTML;
-        ticker1Clone.innerHTML = repeatedHTML;
-        cycleWidth = ticker1.scrollWidth;
-        return;
-    }
-
-    if (screenMode === "2") {
-        ticker2.innerHTML = repeatedHTML;
-        ticker2Clone.innerHTML = repeatedHTML;
-        cycleWidth = ticker2.scrollWidth;
-        return;
-    }
-
-    ticker1.innerHTML = repeatedHTML;
-    ticker1Clone.innerHTML = repeatedHTML;
-
-    ticker2.innerHTML = repeatedHTML;
-    ticker2Clone.innerHTML = repeatedHTML;
-
-    cycleWidth = ticker1.scrollWidth;
-}
-
-function clearTicker() {
-    if (ticker1) ticker1.innerHTML = "";
-    if (ticker1Clone) ticker1Clone.innerHTML = "";
-    if (ticker2) ticker2.innerHTML = "";
-    if (ticker2Clone) ticker2Clone.innerHTML = "";
-    cycleWidth = 0;
-}
-
-/* ---------------- ANIMATION ---------------- */
-function animate() {
+function animate(timestamp) {
     requestAnimationFrame(animate);
 
-    if (!cycleWidth) return;
+    if (!isReady || trackWidth <= 1) return;
 
-    const now = Date.now() - START_TIME;
-    const x = (now * SPEED) % cycleWidth;
-
-    // Only at full ribbon loop boundary, apply next prepared ribbon.
-    if (x < lastX && nextRibbon.length > 0) {
-        if (ribbonSignature(nextRibbon) !== ribbonSignature(activeRibbon)) {
-            activeRibbon = nextRibbon.map(item => ({ ...item }));
-            renderRibbon(activeRibbon);
-        }
+    if (lastTimestamp === null) {
+        lastTimestamp = timestamp;
+        return;
     }
 
-    lastX = x;
+    const delta = (timestamp - lastTimestamp) / 1000;
+    lastTimestamp = timestamp;
 
-    const leftOffset = x;
-    const rightOffset = x + LEFT_SCREEN_WIDTH;
+    scrollX += SPEED_PX_PER_SECOND * delta;
 
-    if (screenMode !== "2") {
-        wrapper1.style.transform = `translate3d(${-leftOffset}px,0,0)`;
+    if (scrollX >= trackWidth) {
+        scrollX = scrollX % trackWidth;
+        applyPendingUpdatesSafely();
     }
 
-    if (screenMode !== "1") {
-        wrapper2.style.transform = `translate3d(${-rightOffset}px,0,0)`;
-    }
+    /*
+        Same ticker, different crop position.
+        Screen 1 = offset 0
+        Screen 2 = offset 2176
+    */
+    const x = -(scrollX + SCREEN_OFFSET);
+
+    tickerWrapper.style.transform = `translate3d(${x}px, 0, 0)`;
 }
 
-animate();
+requestAnimationFrame(animate);
+
+/* ======================================================
+   FALLBACK
+   If only 1-4 stocks arrive initially, still start after 3 sec.
+====================================================== */
+
+setTimeout(() => {
+    if (!isReady && latestStockMap.size > 0) {
+        initializeTicker();
+    }
+}, 3000);
+
 </script>
 
 </body>
