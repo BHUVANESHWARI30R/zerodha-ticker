@@ -2,18 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>DigiWave 2 Screen Stock Ticker</title>
+<title>DigiWave Smooth 2 Screen Ticker</title>
 
 <link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;600;700&display=swap" rel="stylesheet">
 <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 
 <style>
-* {
-    box-sizing: border-box;
-}
-
-html,
-body {
+html, body {
     margin: 0;
     padding: 0;
     background: #000;
@@ -37,33 +32,28 @@ body {
     display: flex;
     align-items: center;
     width: max-content;
-
     will-change: transform;
-    transform: translate3d(0, 0, 0);
+    transform: translate3d(0,0,0);
     backface-visibility: hidden;
-    transform-style: preserve-3d;
 }
 
 .ticker-track {
     display: flex;
     align-items: center;
     height: 120px;
-    width: max-content;
     white-space: nowrap;
+    flex-shrink: 0;
 }
 
-/* ---------- STOCK CARD UI ---------- */
 .stock {
-    width: 300px;
+    width: 310px;
     height: 110px;
     margin-right: 70px;
     flex-shrink: 0;
-
+    color: #fff;
     display: flex;
     flex-direction: column;
     justify-content: center;
-
-    color: #fff;
     letter-spacing: 1px;
 }
 
@@ -77,7 +67,7 @@ body {
 .symbol {
     font-size: 43px;
     font-weight: 700;
-    color: #ffffff;
+    color: #fff;
 }
 
 .percent {
@@ -89,7 +79,7 @@ body {
 .price {
     font-size: 39px;
     font-weight: 600;
-    color: #ffffff;
+    color: #fff;
 }
 
 .change {
@@ -121,7 +111,7 @@ body {
 
 .loading {
     color: #444;
-    font-size: 38px;
+    font-size: 40px;
     padding-left: 40px;
 }
 </style>
@@ -131,98 +121,82 @@ body {
 
 <div class="ticker-container">
     <div id="tickerWrapper" class="ticker-wrapper">
-        <div id="tickerA" class="ticker-track">
+        <div id="track1" class="ticker-track">
             <div class="loading">WAITING FOR LIVE DATA...</div>
         </div>
-        <div id="tickerB" class="ticker-track"></div>
+        <div id="track2" class="ticker-track"></div>
+        <div id="track3" class="ticker-track"></div>
     </div>
 </div>
 
 <script>
-/* ======================================================
-   2 SCREEN CONFIG
-====================================================== */
+/* ================= CONFIG ================= */
 
 const LEFT_WIDTH = 2176;
 const RIGHT_WIDTH = 2048;
-const TOTAL_WIDTH = 4224;
 
 const params = new URLSearchParams(window.location.search);
 const SCREEN = params.get("screen") || "1";
 
-/*
-    screen=1 shows first 2176px
-    screen=2 shows next 2048px
-*/
 const SCREEN_OFFSET = SCREEN === "2" ? LEFT_WIDTH : 0;
 
 /*
-    LED speed.
-    Try 60, 70, 80, 90.
+    Try:
+    45 = slow
+    60 = normal LED ticker
+    75 = faster
 */
-const SPEED_PX_PER_SECOND = 80;
+const SPEED = 55;
 
-/*
-    How often pending updates are allowed to visually apply.
-    Bigger = smoother during market open.
-*/
-const MIN_REBUILD_GAP_MS = 1200;
+const EXPECTED_SYMBOLS = 50;
+const FORCE_START_AFTER_MS = 3000;
 
-/* ======================================================
-   STATE
-====================================================== */
+/* ================= STATE ================= */
 
 const socket = io();
 
 const latestStockMap = new Map();
-const pendingUpdateMap = new Map();
+const pendingStockMap = new Map();
 
 let tickerSequence = [];
+let cardElements = new Map();
 
 let trackWidth = 1;
-let isReady = false;
-let lastTimestamp = null;
-let scrollX = 0;
-let lastRebuildTime = 0;
+let started = false;
 
-const tickerWrapper = document.getElementById("tickerWrapper");
-const tickerA = document.getElementById("tickerA");
-const tickerB = document.getElementById("tickerB");
+let serverOffset = 0;
+let startServerTime = null;
+let lastTextUpdate = 0;
 
-/* ======================================================
-   SOCKET EVENTS
-====================================================== */
+const wrapper = document.getElementById("tickerWrapper");
+const track1 = document.getElementById("track1");
+const track2 = document.getElementById("track2");
+const track3 = document.getElementById("track3");
+
+/* ================= SOCKET ================= */
 
 socket.on("connect", () => {
-    console.log("✅ Connected to backend");
+    console.log("Connected to backend");
 });
 
-socket.on("sync_time", (data) => {
-    // optional; backend already sends this
-    console.log("⏱ sync_time", data);
+socket.on("sync_time", data => {
+    if (!data || !data.server_time) return;
+    serverOffset = Number(data.server_time) - Date.now();
 });
 
-/*
-    Your current backend sends stock_update.
-    We DO NOT update visible DOM immediately.
-    We only store data first.
-*/
-socket.on("stock_update", (data) => {
+socket.on("stock_update", data => {
     const stock = normalizeStock(data);
-
     if (!stock.symbol) return;
 
     latestStockMap.set(stock.symbol, stock);
-    pendingUpdateMap.set(stock.symbol, stock);
+    pendingStockMap.set(stock.symbol, stock);
 
-    if (!isReady && latestStockMap.size >= 5) {
-        initializeTicker();
+    if (!started && latestStockMap.size >= EXPECTED_SYMBOLS) {
+        startTicker();
     }
 });
 
-/* ======================================================
-   DATA NORMALIZE
-====================================================== */
+/* ================= NORMALIZE ================= */
 
 function normalizeStock(data) {
     return {
@@ -233,46 +207,20 @@ function normalizeStock(data) {
     };
 }
 
-/* ======================================================
-   INITIALIZE
-====================================================== */
+/* ================= CARD ================= */
 
-function initializeTicker() {
-    tickerSequence = Array.from(latestStockMap.keys()).sort();
-
-    buildTicker();
-
-    requestAnimationFrame(() => {
-        trackWidth = tickerA.scrollWidth || 1;
-        isReady = true;
-        console.log("✅ Ticker ready", {
-            screen: SCREEN,
-            symbols: tickerSequence.length,
-            width: trackWidth
-        });
-    });
-}
-
-/* ======================================================
-   STOCK CARD UI
-====================================================== */
-
-function createStockCard(stock) {
-    const isUp = stock.change > 0;
-    const isDown = stock.change < 0;
-
-    const cls = isUp ? "up" : isDown ? "down" : "flat";
-    const arrow = isUp ? "▲" : isDown ? "▼" : "●";
+function cardHTML(stock) {
+    const direction = getDirection(stock);
+    const arrow = getArrow(stock);
     const percentSign = stock.change_percent > 0 ? "+" : "";
 
     return `
-        <div class="stock ${cls}" data-symbol="${stock.symbol}">
-            <div class="row top">
+        <div class="stock ${direction}" data-symbol="${stock.symbol}">
+            <div class="row">
                 <span class="symbol">${stock.symbol}</span>
                 <span class="percent">${percentSign}${stock.change_percent.toFixed(2)}%</span>
             </div>
-
-            <div class="row bottom">
+            <div class="row">
                 <span class="price">${stock.ltp.toFixed(2)}</span>
                 <span class="change">${arrow} ${Math.abs(stock.change).toFixed(2)}</span>
             </div>
@@ -280,100 +228,123 @@ function createStockCard(stock) {
     `;
 }
 
-/* ======================================================
-   BUILD TICKER
-====================================================== */
+function getDirection(stock) {
+    if (stock.change > 0) return "up";
+    if (stock.change < 0) return "down";
+    return "flat";
+}
 
-function buildTicker() {
-    if (tickerSequence.length === 0) return;
+function getArrow(stock) {
+    if (stock.change > 0) return "▲";
+    if (stock.change < 0) return "▼";
+    return "●";
+}
+
+/* ================= START ================= */
+
+function startTicker() {
+    if (started) return;
+
+    tickerSequence = Array.from(latestStockMap.keys()).sort();
 
     const html = tickerSequence.map(symbol => {
-        const stock = latestStockMap.get(symbol);
-        if (!stock) return "";
-        return createStockCard(stock);
+        return cardHTML(latestStockMap.get(symbol));
     }).join("");
 
-    tickerA.innerHTML = html;
-    tickerB.innerHTML = html;
+    track1.innerHTML = html;
+    track2.innerHTML = html;
+    track3.innerHTML = html;
+
+    collectCardElements();
 
     requestAnimationFrame(() => {
-        trackWidth = tickerA.scrollWidth || 1;
+        trackWidth = track1.scrollWidth || 1;
+        started = true;
+        startServerTime = Date.now() + serverOffset;
+
+        console.log("Ticker started", {
+            screen: SCREEN,
+            symbols: tickerSequence.length,
+            trackWidth
+        });
     });
 }
 
-/* ======================================================
-   SAFE UPDATE LOGIC
-====================================================== */
+function collectCardElements() {
+    cardElements.clear();
 
-function applyPendingUpdatesSafely() {
-    const now = performance.now();
+    document.querySelectorAll(".stock").forEach(card => {
+        const symbol = card.dataset.symbol;
 
-    if (pendingUpdateMap.size === 0) return;
-    if (now - lastRebuildTime < MIN_REBUILD_GAP_MS) return;
+        if (!cardElements.has(symbol)) {
+            cardElements.set(symbol, []);
+        }
 
-    pendingUpdateMap.forEach((stock, symbol) => {
-        latestStockMap.set(symbol, stock);
+        cardElements.get(symbol).push(card);
     });
-
-    pendingUpdateMap.clear();
-
-    /*
-        Important:
-        We keep tickerSequence same.
-        No random reorder during scroll.
-    */
-    buildTicker();
-
-    lastRebuildTime = now;
 }
 
-/* ======================================================
-   SMOOTH SCROLL ENGINE
-====================================================== */
+/* ================= SAFE TEXT UPDATE ONLY ================= */
 
-function animate(timestamp) {
+function applyPendingTextUpdates() {
+    if (pendingStockMap.size === 0) return;
+
+    pendingStockMap.forEach((stock, symbol) => {
+        const cards = cardElements.get(symbol);
+        if (!cards) return;
+
+        const direction = getDirection(stock);
+        const arrow = getArrow(stock);
+        const percentSign = stock.change_percent > 0 ? "+" : "";
+
+        cards.forEach(card => {
+            card.className = `stock ${direction}`;
+            card.querySelector(".percent").textContent =
+                `${percentSign}${stock.change_percent.toFixed(2)}%`;
+            card.querySelector(".price").textContent =
+                stock.ltp.toFixed(2);
+            card.querySelector(".change").textContent =
+                `${arrow} ${Math.abs(stock.change).toFixed(2)}`;
+        });
+    });
+
+    pendingStockMap.clear();
+}
+
+/* ================= ANIMATION ================= */
+
+function animate() {
     requestAnimationFrame(animate);
 
-    if (!isReady || trackWidth <= 1) return;
+    if (!started || trackWidth <= 1 || startServerTime === null) return;
 
-    if (lastTimestamp === null) {
-        lastTimestamp = timestamp;
-        return;
-    }
+    const now = Date.now() + serverOffset;
+    const elapsed = (now - startServerTime) / 1000;
 
-    const delta = (timestamp - lastTimestamp) / 1000;
-    lastTimestamp = timestamp;
+    const move = (elapsed * SPEED) % trackWidth;
 
-    scrollX += SPEED_PX_PER_SECOND * delta;
+    const x = -(move + SCREEN_OFFSET);
 
-    if (scrollX >= trackWidth) {
-        scrollX = scrollX % trackWidth;
-        applyPendingUpdatesSafely();
-    }
+    wrapper.style.transform = `translate3d(${x}px, 0, 0)`;
 
     /*
-        Same ticker, different crop position.
-        Screen 1 = offset 0
-        Screen 2 = offset 2176
+        Text updates only every 1 second.
+        No rebuild, no layout reset.
     */
-    const x = -(scrollX + SCREEN_OFFSET);
-
-    tickerWrapper.style.transform = `translate3d(${x}px, 0, 0)`;
+    if (performance.now() - lastTextUpdate > 1000) {
+        applyPendingTextUpdates();
+        lastTextUpdate = performance.now();
+    }
 }
 
 requestAnimationFrame(animate);
 
-/* ======================================================
-   FALLBACK
-   If only 1-4 stocks arrive initially, still start after 3 sec.
-====================================================== */
-
+/* Fallback start */
 setTimeout(() => {
-    if (!isReady && latestStockMap.size > 0) {
-        initializeTicker();
+    if (!started && latestStockMap.size > 0) {
+        startTicker();
     }
-}, 3000);
-
+}, FORCE_START_AFTER_MS);
 </script>
 
 </body>
