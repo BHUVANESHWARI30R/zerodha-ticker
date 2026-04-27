@@ -48,6 +48,18 @@ html, body {
     font-variant-numeric: tabular-nums;
 }
 
+/* DEBUG LINE FOR SCREEN SPLIT */
+.split-line {
+    position: fixed;
+    top: 0;
+    left: 2176px; /* exact boundary */
+    width: 2px;
+    height: 240px; /* both rows */
+    background: yellow;
+    z-index: 9999;
+    pointer-events: none;
+}
+
 /* ROW LAYOUT */
 .row {
     display: grid;
