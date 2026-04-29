@@ -63,8 +63,9 @@ html, body {
 /* ROW LAYOUT */
 .row {
     display: grid;
-    grid-template-columns: 200px 150px;
+    grid-template-columns: auto 150px;
     align-items: center;
+    white-space: nowrap;   /* 🔥 prevents breaking */
 }
 
 /* TEXT */
