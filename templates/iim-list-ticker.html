@@ -2,18 +2,16 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>DigiWave Final Smooth Ticker</title>
+<title>DigiWave LED Smooth Ticker</title>
 
-<link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;600;700&display=swap" rel="stylesheet">
-<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-
+<!-- ⚠️ Use system font for HDPlayer smoothness -->
 <style>
 html, body {
     margin: 0;
     padding: 0;
     background: #000;
     overflow: hidden;
-    font-family: 'Teko', sans-serif;
+    font-family: Arial, sans-serif;
 }
 
 /* CONTAINER */
@@ -23,10 +21,18 @@ html, body {
     overflow: hidden;
 }
 
-/* MOVING LAYER */
+/* 🔥 CSS SMOOTH SCROLL (MAIN FIX) */
+@keyframes tickerScroll {
+    0% { transform: translateX(0); }
+    100% { transform: translateX(-50%); }
+}
+
 .ticker-wrapper {
     display: flex;
     width: max-content;
+
+    animation: tickerScroll 90s linear infinite;
+
     will-change: transform;
     transform: translate3d(0,0,0);
 }
@@ -38,118 +44,72 @@ html, body {
 
 /* STOCK CARD */
 .stock {
-    width: 430px;
+    width: 400px;
     height: 110px;
     margin-right: 40px;
     flex-shrink: 0;
+
     display: flex;
     flex-direction: column;
     justify-content: center;
+
     font-variant-numeric: tabular-nums;
 }
 
-/* DEBUG LINE FOR SCREEN SPLIT */
+/* DEBUG LINE */
 .split-line {
     position: fixed;
     top: 0;
-    left: 2176px; /* exact boundary */
-    width: 2px;
-    height: 240px; /* both rows */
-    background: yellow;
+    left: 2176px;
+    width: 3px;
+    height: 120px;
+    background: red;
     z-index: 9999;
-    pointer-events: none;
 }
 
-/* ROW LAYOUT */
+/* ROW */
 .row {
     display: grid;
-    grid-template-columns: 200px 150px;
-    align-items: center;
+    grid-template-columns: 220px 150px;
 }
 
 /* TEXT */
-.symbol {
-    font-size: 42px;
-    font-weight: 700;
-    white-space: nowrap;
-}
+.symbol { font-size: 38px; font-weight: bold; }
+.percent { font-size: 34px; text-align: right; }
+.price { font-size: 36px; }
+.change { font-size: 34px; text-align: right; }
 
-.percent {
-    font-size: 42px;
-    font-weight: 700;
-    text-align: right;
-}
+/* FULL COLOR */
+.stock.up, .stock.up * { color: #00ff00; }
+.stock.down, .stock.down * { color: #ff2b2b; }
+.stock.flat, .stock.flat * { color: #ffffff; }
 
-.price {
-    font-size: 42px;
-    font-weight: 700;
-    white-space: nowrap;
-}
-
-.change {
-    font-size: 42px;
-    font-weight: 700;
-    text-align: right;
-}
-
-/* COLORS */
-.stock.up, .stock.up * {
-    color: #00ff00;
-}
-
-.stock.down, .stock.down * {
-    color: #ff2b2b;
-}
-
-.stock.flat, .stock.flat * {
-    color: #ffffff;
-}
 </style>
+
+<script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
 </head>
 
 <body>
 
-    <div class="split-line"></div> 
-<div class="ticker-container">
+<div class="split-line"></div>
 
+<div class="ticker-container">
     <div id="wrapper" class="ticker-wrapper">
         <div id="track1" class="ticker-track"></div>
         <div id="track2" class="ticker-track"></div>
-        <div id="track3" class="ticker-track"></div>
-        <div id="track4" class="ticker-track"></div>
     </div>
 </div>
 
 <script>
-/* ================= CONFIG ================= */
-
-const LEFT_WIDTH = 2176;
-const SCREEN = new URLSearchParams(location.search).get("screen") || "1";
-const OFFSET = SCREEN === "2" ? LEFT_WIDTH : 0;
-
-const SPEED = 80; // 🔥 smooth speed
-
-/* ================= STATE ================= */
-
 const socket = io();
 
 const latest = new Map();
 const cards = new Map();
 
 let sequence = [];
-let width = 1;
 let started = false;
 
-const wrapper = document.getElementById("wrapper");
-const tracks = [
-    document.getElementById("track1"),
-    document.getElementById("track2"),
-    document.getElementById("track3"),
-    document.getElementById("track4")
-];
-
-/* ================= SOCKET ================= */
-
+/* RECEIVE DATA */
 socket.on("stock_update", data => {
     const s = {
         symbol: data.symbol,
@@ -167,25 +127,20 @@ socket.on("stock_update", data => {
     updateCard(s);
 });
 
-/* ================= START ================= */
-
+/* START */
 function startTicker() {
     sequence = Array.from(latest.keys()).sort();
 
     const html = sequence.map(sym => renderCard(latest.get(sym))).join("");
 
-    tracks.forEach(t => t.innerHTML = html);
+    document.getElementById("track1").innerHTML = html;
+    document.getElementById("track2").innerHTML = html;
 
     mapCards();
-
-    requestAnimationFrame(() => {
-        width = tracks[0].scrollWidth;
-        started = true;
-    });
+    started = true;
 }
 
-/* ================= CARD ================= */
-
+/* CARD */
 function renderCard(s) {
     const dir = s.change > 0 ? "up" : s.change < 0 ? "down" : "flat";
     const arrow = s.change > 0 ? "▲" : s.change < 0 ? "▼" : "●";
@@ -204,6 +159,7 @@ function renderCard(s) {
     </div>`;
 }
 
+/* MAP */
 function mapCards() {
     cards.clear();
 
@@ -214,8 +170,7 @@ function mapCards() {
     });
 }
 
-/* ================= REALTIME UPDATE ================= */
-
+/* REALTIME UPDATE */
 function updateCard(s) {
     const list = cards.get(s.symbol);
     if (!list) return;
@@ -231,23 +186,6 @@ function updateCard(s) {
         el.querySelector(".change").textContent = `${arrow} ${Math.abs(s.change).toFixed(2)}`;
     });
 }
-
-/* ================= SMOOTH SCROLL ================= */
-
-let start = performance.now();
-
-function animate(now) {
-    requestAnimationFrame(animate);
-
-    if (!started) return;
-
-    const t = (now - start) / 1000;
-    const move = (t * SPEED) % width;
-
-    wrapper.style.transform = `translate3d(${-(move + OFFSET)}px,0,0)`;
-}
-
-requestAnimationFrame(animate);
 </script>
 
 </body>
