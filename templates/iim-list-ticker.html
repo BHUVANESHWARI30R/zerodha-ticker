@@ -34,7 +34,7 @@ html, body {
     display: flex;
     width: max-content;
 
-    animation: tickerScroll 120s linear infinite;
+    animation: tickerScroll 90s linear infinite;
 
     will-change: transform;
     transform: translate3d(0,0,0);
@@ -73,35 +73,14 @@ html, body {
 /* ROW */
 .row {
     display: grid;
-    grid-template-columns: 240px 150px;
-    align-items: center;
-    white-space: nowrap;   /* 🔥 prevents line break */
+    grid-template-columns: 220px 150px;
 }
 
 /* TEXT */
-.symbol { 
-     font-size: 38px;
-    font-weight: bold;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-.percent {
-    font-size: 38px;
-    font-weight: bold; 
-    text-align: right; 
-}
-.price { 
-    font-size: 38px;
-    font-weight: bold; 
-}
-.change {
-    font-size: 38px;
-    font-weight: bold;
-    text-align: right;
-}
-
-
+.symbol { font-size: 38px; font-weight: bold; }
+.percent { font-size: 38px; font-weight: bold; text-align: right; }
+.price { font-size: 38px; font-weight: bold; }
+.change { font-size: 38px; font-weight: bold; text-align: right; }
 
 /* FULL COLOR */
 .stock.up, .stock.up * { color: #00ff00; }
